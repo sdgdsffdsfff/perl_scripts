@@ -1,0 +1,50 @@
+[Data]
+AutoPartition = 1
+MsDosInitiated = 0
+UnattendedInstall = Yes
+
+[Unattended]
+UnattendMode = FullUnattended
+OemSkipEula = Yes
+OemPreinstall = No
+UnattendSwitch = Yes
+CrashDumpSetting = 1
+DriverSigningPolicy = ignore
+WaitForReboot = no
+Repartition = yes
+
+[GuiUnattended]
+AdminPassword = "redhat"
+AutoLogon = Yes
+AutoLogonCount = 5
+OEMSkipRegional = 1
+TimeZone = 85
+OemSkipWelcome = 1
+
+[UserData]
+FullName = "rhqe"
+OrgName = "REDHAT"
+ComputerName = *
+ProductKey = "FRQWV-XV8J9-JPVTD-XJ88F-TVY4Q"
+
+[Identification]
+	DomainAdmin=Administrator
+	DomainAdminPassword="redhat"
+	JoinDomain="qe.redhat.com"
+
+[Networking]
+    InstallDefaultComponents=Yes
+
+[Components]
+
+[TerminalServices]
+AllowConnections = 1
+
+[GuiRunOnce]
+Command0="C:\WINDOWS\System32\CScript.exe A:\setup.vbs"
+
+[WindowsFirewall]
+Profiles = WindowsFirewall.TurnOffFirewall
+[WindowsFirewall.TurnOffFirewall]
+Mode = 0
+

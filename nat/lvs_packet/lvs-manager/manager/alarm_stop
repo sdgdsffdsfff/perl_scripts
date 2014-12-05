@@ -1,0 +1,23 @@
+#!/usr/bin/perl
+
+my $lib_path=`echo $0 | sed "s/\$(basename $0)//g"`;
+chomp($lib_path);
+$lib_path =~ s/\/$//;
+require("$lib_path/common");
+
+my $lvs_tool = "$lib_path/bvsadm";
+my $cmd = `basename $0`;
+chomp($cmd);
+my $param_str = $cmd;
+
+my $i;
+for ($i = 1; $i <= $#ARGV; $i++) {
+    chomp($ARGV[$i]);
+    $param_str .= " ".$ARGV[$i];
+}
+
+my $lvs_path = get_value("$param_str", " lvs_path=");
+
+$param = "lvs_alarm alarm=stop";
+do_config("$lvs_tool $param", "$lvs_path");
+

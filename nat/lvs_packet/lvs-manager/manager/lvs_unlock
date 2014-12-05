@@ -1,0 +1,27 @@
+#!/usr/bin/perl
+
+my $lib_path=`echo $0 | sed "s/\$(basename $0)//g"`;
+chomp($lib_path);
+$lib_path =~ s/\/$//;
+require("$lib_path/common");
+
+my $lvs_tool = "$lib_path/bvsadm";
+
+my $cmd = `basename $0`;
+chomp($cmd);
+my $param_str = $cmd;
+
+my $i;
+for ($i = 1; $i <= $#ARGV; $i++) {
+    chomp($ARGV[$i]);
+    $param_str .= " ".$ARGV[$i];
+}
+
+my $lvs_path = get_value("$param_str", " lvs_path=");
+if (-e $lvs_path) {
+    chdir $lvs_path;
+    print "config cmd:\t$lvs_tool lvs_unlock\n";
+    `rm ./lock -rf`;
+     print "Success\n";
+}
+

@@ -1,0 +1,5 @@
+#!/bin/sh
+
+echo "start lvsm"
+
+./dl_lvsm.pl conf alarm_service.conf

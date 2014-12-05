@@ -1,0 +1,165 @@
+
+import sys, os, logging
+
+# Insert lib of xen python interfaces before autotest/bin, so that xm will
+# find the right module to import
+
+path_list = os.environ['PYTHONPATH'].split(':')
+for path in ['/usr/lib/python2.4/site-packages/', '/usr/lib64/python2.4/site-packages/']:
+    if os.path.exists(path) and path not in path_list[:2]:
+        path_list.insert(0,path)
+os.environ['PYTHONPATH'] = ':'.join(path_list)
+
+# Add the Xen tests dir to the python path
+xen_test_dir = os.path.join(os.environ['AUTODIR'],'tests/xen')
+sys.path.append(xen_test_dir)
+
+pwd = xen_test_dir
+
+#-----------------------------------------------------------------------------
+# set English environment (command output might be localized, need to be safe)
+#-----------------------------------------------------------------------------
+os.environ['LANG'] = 'en_US.UTF-8'
+
+# ------------------------
+# create required symlinks
+# ------------------------
+rootdir='/var/run/xen-autotest'
+iso=os.path.join(rootdir, 'iso')
+images=os.path.join(rootdir, 'images')
+floppy_dir = os.path.join(rootdir, 'floppy')
+
+if not os.path.exists(rootdir):
+    os.makedirs(rootdir)
+
+for dir in [iso, images, floppy_dir]:
+    if not os.path.exists(dir):
+        os.mkdir(dir)
+
+# ----------------------------------------------------------
+# Start nfs service
+# ----------------------------------------------------------
+s,o = commands.getstatusoutput("service nfs start")
+if s != 0:
+    raise error.TestError("Can not start nfs service; Reason %s" 
+                           % o)
+else:
+    logging.debug("Start nfs service")
+
+# ----------------------------------------------------------
+# Export the 'images' dir to the world for migration
+# ----------------------------------------------------------
+cmd = "exportfs -v -o rw,no_root_squash *:%s " % images
+s,o = commands.getstatusoutput(cmd)
+if s != 0:
+    raise error.TestError("Failed to exportfs %s; Reason %s" %
+                                           (images, o))
+else:
+    logging.debug("Export %s to the world" % images)
+
+# Check if the nfs server is deployed successfully
+s,o = commands.getstatusoutput("exportfs | grep %s" % images)
+if s != 0:
+    raise error.TestError("exportfs doesn't show %s" % images)
+
+os.environ['ISO_DIR'] = iso
+os.environ['IMAGE_DIR'] = images
+os.environ['FLOPPY_DIR'] = floppy_dir
+
+def link_if_not_exist(ldir, target, link_name):
+    t = target
+    l = os.path.join(ldir, link_name)
+    if not os.path.exists(l):
+        os.system('ln -s %s %s' % (t, l))
+
+# Create links only if not already exist
+#link_if_not_exist(pwd, '../../', 'autotest')
+link_if_not_exist(pwd, iso, 'isos')
+link_if_not_exist(pwd, images, 'images')
+link_if_not_exist(pwd, floppy_dir, 'floppies')
+
+
+
+# ----------------------------------------------------------
+# Clear the enviroments before Test Run
+# ----------------------------------------------------------
+env_path = os.path.join(os.environ['AUTODIR'],'tests/xen/env')
+if os.path.exists(env_path):
+    logging.debug("env file existed,remove it")
+    os.remove(env_path)
+
+# ----------------------------------------------------------
+# Deploy a NFS server on localhost for PV unattended install
+# ----------------------------------------------------------
+nfs_export = os.path.join(pwd,"unattended/pv_ks")
+cmd = "exportfs -v *:%s " % nfs_export
+s,o = commands.getstatusoutput(cmd)
+if s != 0:
+    raise error.TestError("Failed to exportfs %s; Reason %s" %
+                                           (nfs_export, o))
+else:
+    logging.debug("NFS for PV unattended install deployed")
+
+# Check if the nfs server is deployed successfully
+s,o = commands.getstatusoutput("exportfs | grep %s" % nfs_export)
+if s != 0:
+    raise error.TestError("exportfs doesn't show %s" % nfs_export)
+
+
+
+# ----------------------------------------------------------
+# Get test set (dictionary list) from the configuration file
+# ----------------------------------------------------------
+import xen_config
+
+filename = os.path.join(pwd, "xen_tests.cfg")
+cfg = xen_config.config(filename)
+
+list = cfg.get_list()
+
+
+# -------------------------------------------
+# work around for RHBZ617435
+# disable nic checksum for windows guest
+# -------------------------------------------
+import commands
+
+is_win = False
+for dict in list:
+    test_name = dict.get("name")
+    if test_name.find("Windows") != -1:
+        is_win = True
+        break
+if is_win == True:
+    (stat1,out1) = commands.getstatusoutput('lspci|grep Ethernet|grep Broadcom')
+    if stat1 == 0:
+        logging.debug("this machine has Broadcom nics, nic is: \n %s" %out1)
+        (stat2,out2) = commands.getstatusoutput('ethtool -K eth0 tx off')
+        (stat3,out3) = commands.getstatusoutput('ethtool -k eth0')
+        logging.debug("nic offload features now: \n %s" %out3)
+
+# -------------
+# Run the tests
+# -------------
+status_dict = {}
+
+for dict in list:
+    if dict.get("skip") == "yes":
+        continue
+    dependencies_satisfied = True
+    for dep in dict.get("depend"):
+        for test_name in status_dict.keys():
+            if not dep in test_name:
+                continue
+            if not status_dict[test_name]:
+                dependencies_satisfied = False
+                break
+    if dependencies_satisfied:
+        test_iterations = int(dict.get("iterations", 1))
+        current_status = job.run_test("xen", params=dict,
+                                      tag=dict.get("shortname"),
+                                      iterations=test_iterations)
+    else:
+        current_status = False
+    status_dict[dict.get("name")] = current_status
+

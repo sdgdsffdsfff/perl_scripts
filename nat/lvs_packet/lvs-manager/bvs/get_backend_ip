@@ -1,0 +1,176 @@
+#!/usr/bin/perl
+# $Description: Show
+# $Date: 2010-03-22
+# $Bug-Report: stl-net@baidu.com
+# $ChangeLog:
+
+use strict;
+use warnings;
+
+require("/home/bvs-manager/bvs/common.pl");
+
+my %vs =
+(
+	'vip'=>'',
+	'vport'=>'',
+	'protocol'=>'TCP'
+);
+
+my %op_num_msg =
+(
+	'0'=>"Success",
+	'102'=>"Invalid option",
+	'210'=>"Error in exec ipvsadm -L",
+	'211'=>"Error in exec ip addr command",
+	'231'=>"Can't find the virtual server"
+);
+
+my $IP_ADDR_LIST_CMD = "/sbin/ip addr list";
+my $IPVSADM_L_CMD = "/sbin/ipvsadm -L";
+my @ip_addr = ();
+my @ipvsadmL = ();
+my $find_vs_flag = 0;
+my %backend_ip=();
+my %ips_nic=();
+my $ret = 0;
+
+###############
+# Functions
+###############
+# Show usage
+sub show_usage($)
+{
+	err_exit("Usage:\n$0	<VIP> <Vport> <Protocol> \n$0	<VIP> <Vport>", 0);
+}
+
+sub init_opt
+{
+# Get vip and vport
+	if (is_ip($ARGV[0]) and is_port($ARGV[1]))
+	{
+		$vs{'vip'} = $ARGV[0];
+		$vs{'vport'} = $ARGV[1];
+	}
+	else
+	{
+		err_exit("$op_num_msg{102}", 102);
+	}
+
+# Get protocol
+	if (defined($ARGV[2]))
+	{
+		if(is_protocol($ARGV[2]))
+		{
+			$vs{'protocol'}=$ARGV[2];
+		}
+		else
+		{
+			err_exit("$op_num_msg{102}", 102);
+		}
+	}
+}
+
+sub get_ipvsadm_L
+{
+	# Find Backend IP in kernel by ipvsadm -L
+	@ipvsadmL = `$IPVSADM_L_CMD 2>&1`;
+	if ($? ne 0 or $ipvsadmL[0] !~ /IP Virtual Server version/)
+	{
+		print("$IPVSADM_L_CMD 2>&1 Error\n");
+		print(@ipvsadmL);
+		return 210;
+	}
+
+	foreach my $ipvsadm_line (@ipvsadmL)
+	{
+		if ($find_vs_flag ne 0)
+		{
+			if ($ipvsadm_line =~ /^\s+\-\>\s+(\d+\.\d+\.\d+\.\d+)\s+\d+\s+\d+/)
+			{
+				$backend_ip{$1}="	Not bind";
+				next;
+			}
+			if ($ipvsadm_line =~ /\w+\s+\d+\.\d+\.\d+\.\d+:\d+/)
+			{# arrive new vs information 
+				last;
+			}
+		}
+
+		if ($ipvsadm_line =~ /$vs{'protocol'}\s+$vs{'vip'}:$vs{'vport'}/)
+		{
+			$find_vs_flag = 1;
+			next;
+		}
+	}
+	
+	if($find_vs_flag eq 0)
+	{
+		return 231;
+	}
+	return 0;
+}
+
+sub get_ip_addr
+{
+	my $curr_dev='';
+	# Get All ip address on devices
+	@ip_addr = `$IP_ADDR_LIST_CMD 2>&1`;
+	if ($? ne 0 or $ip_addr[0] !~ /^1:\s+/)
+	{
+		print("$IP_ADDR_LIST_CMD Error\n");
+		print(@ip_addr);
+		return 211;
+	}
+	return 0;
+}
+
+sub list_backend_ip
+{
+	my $curr_dev = '';
+	foreach my $ip_nic (@ip_addr)
+	{
+		if($ip_nic =~ /^\d+:\s+(\w+):\s+/)
+		{
+			$curr_dev = $1;
+			next;
+		}
+		if($ip_nic =~ /\s+inet\s+(\d+\.\d+\.\d+\.\d+)\/(\d+)\s*/)
+		{
+			if(defined($backend_ip{$1}))
+			{
+				$backend_ip{$1} = "/$2	$curr_dev";
+			}
+		}
+	}
+
+	print("Backend_IP		Bind to\n");
+	foreach my $my_ip (sort(keys(%backend_ip)))
+	{
+		print("${my_ip}$backend_ip{$my_ip}\n");
+	}
+	return 0;
+}
+
+################
+# Main process
+################
+if ($#ARGV ne 1 and $#ARGV ne 2)
+{
+	show_usage($0);
+}
+
+init_opt();
+
+# Check each IP and show
+$ret = get_ipvsadm_L();
+if($ret ne 0)
+{
+	err_exit("$op_num_msg{$ret}", $ret);
+}
+$ret = get_ip_addr();
+if($ret ne 0)
+{
+	err_exit("$op_num_msg{$ret}", $ret);
+}
+$ret = list_backend_ip();
+err_exit("$op_num_msg{$ret}", $ret);

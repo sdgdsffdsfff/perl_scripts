@@ -1,0 +1,84 @@
+#!/usr/bin/perl
+
+my $lib_path=`echo $0 | sed "s/\$(basename $0)//g"`;
+chomp($lib_path);
+$lib_path =~ s/\/$//;
+require("$lib_path/common");
+
+my $lvs_tool = "$lib_path/bvsadm";
+my $cmd = `basename $0`;
+chomp($cmd);
+my $param_str = $cmd;
+my $check_tcp_tool = "/usr/local/nagios/libexec/check_tcp";
+my $ping_tool = "ping -c 2";
+
+my $i;
+for ($i = 1; $i <= $#ARGV; $i++) {
+    chomp($ARGV[$i]);
+    $param_str .= " ".$ARGV[$i];
+}
+
+my $lvs_path = get_value("$param_str", "lvs_path");
+my $lvs_main_path = `dirname $lvs_path`;
+chomp $lvs_main_path;
+my $vip = get_value("$param_str", "vip");
+my $vport = get_value("$param_str", "vport");
+my $vip_type = get_value("$param_str", "vip_type");
+
+sub check_vip_new($$)
+{
+    my $vip = $_[0];
+    my $vport = $_[1];
+    my @cmd_table = (
+	"$check_tcp_tool -H $vip -p 80 -t 3",
+	"$check_tcp_tool -H $vip -p 22 -t 3",
+	"$check_tcp_tool -H $vip -p 8361 -t 3",
+	"$check_tcp_tool -H $vip -p $vport -t 3",
+	"$ping_tool $vip"
+    );
+
+    for my $cmd (@cmd_table) {
+	my $res = `$cmd`;
+	if ($? == 0) {
+	    print "check vip: $cmd\n";
+	    return 1;
+	}
+    }
+    
+    my $cmd = "grep --include=\*.conf $vip -r $lvs_main_path";
+    my $res = `$cmd`;
+    if ($? == 0) {
+	print "check vip: $cmd\n";
+	return 1;
+    }
+    return 0;
+}
+
+sub check_vip_exist($)
+{
+    my $vip = $_[0];
+    my $cmd = "grep --include=\*.conf $vip -r $lvs_main_path";
+    my $res = `$cmd`;
+    
+    if ($? != 0) {
+	return 1;
+    }
+    return 0;
+}
+
+if ($vip_type == 0) {
+    my $ret = check_vip_new($vip, $vport);
+    if ($ret != 0) {
+	print "Error: vip $vip is already in use\n";
+	write_msg("Error: vip $vip is already in use\n");
+	exit 1;
+    }
+} else {
+    my $ret = check_vip_exist($vip);
+    if ($ret != 0) {
+	print "Error: vip $vip is not exist\n";
+	write_msg("Error: vip $vip is not exist\n");
+	exit 1;
+    }
+}
+

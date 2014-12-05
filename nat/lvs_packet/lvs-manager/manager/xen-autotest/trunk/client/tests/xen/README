@@ -1,0 +1,49 @@
+git tricks for xen-autotest
+
+1. push via ssh while pulling with git url (need higher version git):
+
+(1) : add pushurl in remote section:
+[remote "origin"]
+        pushurl = git@qe-git.englab.nay.redhat.com:/home/git/repo/yuzhang/xen-autotest
+
+(2) : overwrite the git url for push only
+[url "git://qe-git.englab.nay.redhat.com/yuzhang/xen-autotest"]
+        pushInsteadOf = git@qe-git.englab.nay.redhat.com:/home/git/repo/yuzhang/xen-autotest
+
+
+2. Branches management:
+
+(1) On the git server, we have 2 branches: master, virtlab
+        $ git branch -a
+             * master                # change frequently, unstable
+               virtlab               # only used for virtlab
+
+(2) test case developer:
+        $ git clone
+        $ git branch -b experiment   # Create a local branch
+        $ edit, add, commit          # Do local changes 
+        $ git checkout master
+        $ git pull
+        $ git rebase master experiment
+        $ git checkout master
+        $ git merge experiment       # Fast forward
+        ...                          # Push to Server or apply changes to virtlab 
+
+(3) virtlab:
+        $ git clone git://qe-git.englab.nay.redhat.com/yuzhang/xen-autotest
+        $ git branch -a              # 1 local branch (master), 3 remote branches
+        * master
+          origin/HEAD
+          origin/master
+          origin/virtlab
+
+        $ git checkout -b virtlab origin/virtlab
+        $ git branch -a              # 1 new local branch added (virtlab)
+            master
+          * virtlab
+            origin/HEAD
+            origin/master
+            origin/virtlab
+        $ git merge master           # merge master into virtlab branch
+        $ git push git+ssh://git@qe-git.englab.nay.redhat.com/home/git/repo/yuzhang/xen-autotest virtlab:virtlab # push local virtlab branch to remote server
+        # $ git push git+ssh://git@qe-git.englab.nay.redhat.com/home/git/repo/yuzhang/xen-autotest :virtlab # if local branch is ommited, it will delete the remote branch (origin/virtlab)

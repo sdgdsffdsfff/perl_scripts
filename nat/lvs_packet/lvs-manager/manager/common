@@ -1,0 +1,389 @@
+#!/usr/bin/perl
+use Data::Dumper;
+
+#my $lvs_tools = "\$(pwd)./bvsadm";
+
+my @sv_param_tb = (
+    "service_name"
+);
+
+my @vs_param_tb = (
+    "vip",
+    "vport",
+    "protocol",
+    "service_name",
+    "virtualhost",
+    "lb_algo",
+    "lb_kind",
+    "rs_alive_ratio_up",
+    "rs_alive_ratio_down",
+    "priority_delta",
+    "addback_time",
+    "delay_loop",
+    "vgroup_name",
+    "ip_blist"
+);
+
+my @del_vs_param_tb = (
+    "vip",
+    "vport",
+    "protocol",
+    "service_name"
+);
+
+my @vrrp_vs_param_tb = (
+    "vrrp_name"
+);
+
+my @vrrp_param_tb = (
+    "vrrp_name",
+    "vrrp_instance",
+    "virtual_router_id",
+    "state",
+    "priority",
+    "vip",
+    "interface"
+);
+
+my @del_vrrp_tb = (
+    "vrrp_name",
+    "vip"
+);
+
+my @rs_http_checker_param_tb = (
+    "vip",
+    "vport",
+    "protocol",
+    "service_name",
+    "rip",
+    "rport",
+    "checker",
+    "url_path",
+    "url_digest",
+    "connect_timeout",
+    "nb_get_retry",
+    "delay_before_retry",
+    "status_code"
+);
+
+my @rs_tcp_checker_param_tb = (
+    "vip",
+    "vport",
+    "protocol",
+    "service_name",
+    "rip",
+    "rport",
+    "checker",
+    "connect_timeout",
+    "connect_retry"
+);
+
+my @rs_misc_checker_param_tb = (
+    "vip",
+    "vport",
+    "protocol",
+    "service_name",
+    "rip",
+    "rport",
+    "checker",
+    "misc_path",
+    "misc_timeout"
+);
+
+my @del_rs_param_tb = (
+    "vip",
+    "vport",
+    "protocol",
+    "service_name",
+    "rip",
+    "rport"
+);
+
+my @add_bip_param_tb = (
+    "vip",
+    "vport",
+    "protocol",
+    "service_name",
+    "bip",
+    "dev",
+    "mask"
+);
+
+my @del_bip_param_tb = (
+    "vip",
+    "vport",
+    "protocol",
+    "service_name",
+    "bip"
+);
+
+my @add_static_ip_param_tb = (
+    "static_ip",
+    "dev",
+    "mask"
+);
+
+my @del_static_ip_param_tb = (
+    "static_ip"
+);
+
+
+my @alarm_param_tb = (
+    "alarm"
+);
+
+my @vip_param_tb = (
+    "vip"
+);
+
+my @reload_keepalived_param_tb = (
+    "process"
+);
+
+my @get_conf_sv_param_tb = (
+    "service_name"
+);
+
+my @get_conf_vs_param_tb = (
+    "vip",
+    "vport",
+    "protocol"
+);
+
+my @get_conf_rs_param_tb = (
+    "vip",
+    "vport",
+    "protocol",
+    "service_name"
+);
+
+my @get_conf_bip_param_tb = (
+    "vip",
+    "vport",
+    "protocol",
+    "service_name"
+);
+
+my @get_bvs_rs_param_tb = (
+    "vip",
+    "vport",
+    "protocol"
+);
+
+my @get_bvs_bip_param_tb = (
+    "vip",
+    "vport",
+    "protocol"
+);
+
+my @add_alarm_tb = (
+    "vip",
+    "service_name",
+    "sms_alarm",
+    "email_alarm"
+);
+
+my @del_alarm_tb = (
+    "vip",
+);
+
+my @edit_alarm_tb = (
+    "vip",
+    "service_name",
+    "sms_alarm",
+    "email_alarm"
+);
+
+my @check_vip_available_tb = (
+    "vip",
+    "vport",
+    "vip_type"
+);
+
+my @no_param_tb = ();
+
+my %status_code = (
+    '0'	    =>	"Success",
+    '10'    =>	"cmd not defined",
+    '20'    =>	"unexpected parameters",
+    '30'    =>	"unknown"
+);
+
+my %lvs_cmd_table = (
+    "add_sv"	=>  \@sv_param_tb,
+    "del_sv"	=>  \@sv_param_tb,
+    "add_vs"	=>  \@vs_param_tb,
+    "edit_vs"	=>  \@vs_param_tb,
+    "add_vrrp_sv"   =>	\@vrrp_vs_param_tb,
+    "del_vrrp_sv"   =>	\@vrrp_vs_param_tb,
+    "add_vrrp"	=>  \@vrrp_param_tb,
+    "edit_vrrp"	=>  \@vrrp_param_tb,
+    "del_vrrp"	=>  \@del_vrrp_tb,
+    "del_vs"	=>  \@del_vs_param_tb,
+    "add_rs"	=>  \@no_param_tb,
+    "del_rs"	=>  \@del_rs_param_tb,
+    "add_bip"	=>  \@add_bip_param_tb,
+    "del_bip"	=>  \@del_bip_param_tb,
+    "add_static_ip" =>	\@add_static_ip_param_tb,
+    "del_static_ip" =>	\@del_static_ip_param_tb,
+    "get_static_ip" =>	\@no_param_tb,
+    "get_dev_bip" =>	\@no_param_tb,
+    "lvs_alarm"	    =>	\@alarm_param_tb,
+    "enable_vip"    =>	\@vip_param_tb,	
+    "disable_vip"   =>	\@vip_param_tb,
+    "alarm_start"   =>	\@alarm_param_tb,
+    "alarm_stop"    =>	\@alarm_param_tb,
+    "reload_keepalived"	    =>	\@reload_keepalived_param_tb,
+    "get_conf_all_sv"	=>  \@get_conf_sv_param_tb,
+    "get_conf_sv"	=>  \@get_conf_sv_param_tb,
+    "get_conf_vs"	=>  \@get_conf_vs_param_tb,
+    "get_conf_rs"	=>  \@get_conf_rs_param_tb,
+    "get_conf_bip"	=>  \@get_conf_bip_param_tb,
+    "get_bvs_vs"	=>  \@get_bvs_vs,
+    "get_bvs_rs"	=>  \@get_conf_rs_param_tb,
+    "get_bvs_bip"	=>  \@get_bvs_bip_param_tb,
+    "upload_config"	=>  \@no_param_tb,
+    "download_config"	=>  \@no_param_tb,
+    "backup_config"	=>  \@no_param_tb,
+    "remote_backup_config"  =>	\@no_param_tb,
+    "upload_alarm_config"   =>	\@no_param_tb,
+    "do_lvs_backup"	    =>	\@no_param_tb,
+    "lvs_rollback"	    =>	\@no_parma_tb,
+    "add_alarm"		    =>	\@add_alarm_tb,
+    "del_alarm"		    =>	\@del_alarm_tb,
+    "edit_alarm"	    =>	\@edit_alarm_tb,
+    "check_vip_available"   =>	\@check_vip_available_tb
+);  
+
+my %rs_cmd_table = (
+    "TCP_CHECK"   =>	\@rs_tcp_checker_param_tb,
+    "HTTP_GET"  =>	\@rs_http_checker_param_tb,
+    "SSL_GET"  =>	\@rs_http_checker_param_tb,
+    "MISC_CHECK"  =>	\@rs_misc_checker_param_tb
+);
+
+sub get_cmd_param($)
+{
+    my @argv = split(/ /, $_[0]);
+    my $cmd = $argv[0];
+    chomp($cmd);
+    my $key = '';
+    my $value = '';
+    my %cmd_tb = ();
+    my $ret = $cmd;   
+    if (not defined $lvs_cmd_table{$cmd}) {
+	print "Error: $cmd not defined\n";
+	return (10);
+    }
+    for ($i = 1; $i <= $#argv; $i ++) {
+	if ($argv[$i] =~ /=/) {
+	    ($key, $value) = split(/=/, $argv[$i]);
+	} else {
+	    $key = $argv[$i];
+	    $value = "";
+	}
+	chomp($value);
+	$cmd_tb{$key} = $value;
+    }
+    foreach my $param (@{$lvs_cmd_table{$cmd}}) {
+	if (not defined $cmd_tb{$param} or not $cmd_tb{$param}) {
+	    if ($param == 'virtualhost' or $param == 'vgroup_name' or $param == 'ip_blist') {
+		next;
+	    }
+	    print "Error: $param not defined\n";
+	    return (20);
+	}
+	$ret .= " $param=$cmd_tb{$param}";
+    }
+    return (0, $ret);
+}
+
+sub get_rs_cmd_param($)
+{
+    my @argv = split(/ /, $_[0]);
+    my $cmd = $argv[0];
+    chomp($cmd);
+    my $key = '';
+    my $value = '';
+    my %cmd_tb = ();
+    my $ret = $cmd;   
+    my $checker = get_value("$_[0]", "checker=");
+    
+    
+    if (not defined $rs_cmd_table{$checker}) {
+	print "Error: $checker not defined\n";
+	return (10);
+    }
+    for ($i = 1; $i <= $#argv; $i ++) {
+	if ($argv[$i] =~ /=/) {
+	    ($key, $value) = split(/=/, $argv[$i]);
+	} else {
+	    $key = $argv[$i];
+	    $value = "";
+	}
+	chomp($value);
+	$cmd_tb{$key} = $value;
+    }
+
+    if(($checker eq "HTTP_GET" or $checker eq "SSL_GET") and not defined $cmd_tb{"url_digest"} and not defined $cmd_tb{"status_code"} ){
+	print "Error: usl_digest or status_code not defined\n";
+	return (20);
+    }
+
+    foreach my $param (@{$rs_cmd_table{$checker}}) {
+	if (($param ne "url_digest" and $param ne "status_code") and not defined $cmd_tb{$param}) {
+	    print "Error: $param not defined\n";
+	    return (20);
+	}
+	$ret .= " $param=$cmd_tb{$param}";
+    }
+    
+    return (0, $ret);
+}
+
+sub get_value($)
+{
+    my @argv = split(/ /, $_[0]);
+    my $pattern = $_[1] ;
+       
+    chomp($pattern);
+    $pattern =~ s/^\s+//;
+    for ($i = 1; $i <= $#argv; $i ++) {
+	if ($argv[$i] =~ /^$pattern/) {
+	    ($key, $value) = split(/=/, $argv[$i]);
+	    return $value;
+	}
+	chomp($value);
+    }
+}
+
+sub do_config($)
+{
+    my $lvs_conf_cmd = $_[0];
+    my $lvs_path = $_[1];
+    opendir(TEMP, $lvs_path) || die "Cannot open $lvs_path:$!";
+    my @FILES = readdir TEMP;
+    for(my $index = 0; $index < @FILES; $index++){
+	if ($FILES[$index] =~ "qihoo.net") {
+	    chdir "$lvs_path/$FILES[$index]";
+	    print "config cmd:\t$lvs_conf_cmd\n";
+	    my $ret = `$lvs_conf_cmd`;
+	    if ($? ne 0) {
+		print "lvs config failed: $lvs_conf_cmd, $ret\n";
+		if ($ret =~ /already exist/) {
+		    next;
+		}
+		exit 1;
+	    } else {
+		print "Success\n";
+	    }
+	}
+    }
+    closedir(TEMP);
+}
+
+sub write_msg()
+{
+    print "lvs config: $status_code{$_[0]}\n";
+}
+

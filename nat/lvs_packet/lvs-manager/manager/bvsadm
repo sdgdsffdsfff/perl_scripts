@@ -1,0 +1,3175 @@
+#!/usr/bin/perl
+# $Description: 
+# $Date:
+# $Bug Reprot: stl-net@baidu.com
+# $Change Log:
+
+use warnings;
+use strict;
+my $lib_path=`echo $0 | sed 's/bvsadm//g'`;
+chomp($lib_path);
+require("$lib_path/common.pl");
+
+#################
+# Commands Table
+#################
+my %cmds_table = 
+(
+	'add_sv'=>\&add_service,
+	'del_sv'=>\&del_service,
+	'add_vrrp_sv'=>\&add_vrrp_service,
+	'del_vrrp_sv'=>\&del_vrrp_service,
+	'add_vrrp'=>\&add_vrrp,
+	'del_vrrp'=>\&del_vrrp,
+	'edit_vrrp'=>\&edit_vrrp,
+	'add_vs'=>\&add_vs,
+	'del_vs'=>\&del_vs,
+	'edit_vs'=>\&edit_vs,
+	'add_rs'=>\&add_rs,
+	'del_rs'=>\&del_rs,
+	'add_bip'=>\&add_bip,
+	'del_bip'=>\&del_bip,
+	'add_static_ip'=>\&add_static_ip,
+	'del_static_ip'=>\&del_static_ip,
+	'get_static_ip'=>\&get_static_ip,
+	'lvs_alarm'=>\&lvs_alarm,
+
+	'enable_vip'=>\&enable_vip,
+	'disable_vip'=>\&disable_vip,
+
+	'upload_config'=>\&upload_config,
+	'upload_alarm_config'=>\&upload_alarm_config,
+	'download_config'=>\&download_config,
+	'backup_config'=>\&backup_config,
+	'remote_backup_config'=>\&remote_backup_config,
+	'reload_keepalived'=>\&reload_keepalived,
+
+	'get_conf_all_sv'=>\&get_conf_all_sv,
+	'get_conf_sv'=>\&get_conf_sv,
+	'get_conf_vs'=>\&get_conf_vs,
+	'get_conf_rs'=>\&get_conf_rs,
+	'get_conf_bip'=>\&get_conf_bip,
+	'get_bvs_vs'=>\&get_bvs_vs,
+	'get_bvs_rs'=>\&get_bvs_rs,
+	'get_bvs_bip'=>\&get_bvs_bip,
+	'get_dev_bip'=>\&get_dev_bip,
+
+	'total_add_rs'=>\&total_add_rs,
+	'total_add_cluster_vip'=>\&total_add_cluster_vip,
+	'lvs_rollback'	=>  \&lvs_rollback,
+	'do_lvs_backup'	=>  \&do_lvs_backup,
+	'add_alarm' =>	\&add_alarm,
+	'del_alarm' =>	\&del_alarm,
+);
+
+#################################
+# Configuration and Const Values
+#################################
+my $main_config_file_path = "keepalived.conf";
+my $remote_conf_path = "/usr/local/etc/keepalived/";
+my $remote_conf_path_tmp = "/usr/local/etc/keepalived_tmp/";
+my $system_conf_patch = "system.config";
+my $alarm_service_conf = "alarm_service.conf";
+my $log_path = "log";
+my $local_conf_bak_path = "conf_bak/";
+my $remote_mgr_path = "/home/bvs-manager/bvs/";
+my $remote_alarm_path = "/home/lvs/alarm/";
+my $remote_alarm = $remote_mgr_path."alarm.pl";
+my $remote_backup_path = "/home/lvs/backup/config";
+my $remote_last_config = "/home/lvs/backup/last";
+my $remote_reload_keepalived = $remote_mgr_path."reload_keepalived";
+my $remote_vip_adm = $remote_mgr_path."vip_adm";
+my $remote_show_vs = $remote_mgr_path."show_vs";
+my $remote_get_vs_rs = $remote_mgr_path."get_vs_rs";
+my $remote_get_backend_ip= $remote_mgr_path."get_backend_ip";
+
+my $BIP_START_INFO	= "\t!back_ipaddress start here\n";
+my $BIP_END_INFO	= "\t!back_ipaddress end here\n";
+my $RS_START_INFO	= "\t!real_server start here\n";
+my $RS_END_INFO		= "\t!real_server end here\n";
+
+####################
+# System Commands
+####################
+my $SSH_CMD="/usr/bin/ssh -o ConnectTimeout=30 ";
+my $SCP_CMD="/usr/bin/scp -o ConnectTimeout=30 -r";
+my $PWD_CMD="/bin/pwd";
+my $TOUCH_CMD="/bin/touch";
+my $MKDIR_CMD="/bin/mkdir";
+my $CAT_CMD="/bin/cat";
+my $RM_CMD="/bin/rm";
+
+## functions for checking opt 
+my %cmds_opt_init_table = 
+(
+	'add_sv'=>\&opt_sv,
+	'del_sv'=>\&opt_sv,
+	'add_vs'=>\&opt_add_edit_vs,
+	'del_vs'=>\&opt_sv_vs,
+	'edit_vs'=>\&opt_add_edit_vs,
+	'add_rs'=>\&opt_sv_vs_add_rs,
+	'del_rs'=>\&opt_sv_vs_del_rs,
+	'add_bip'=>\&opt_add_bip,
+	'del_bip'=>\&opt_del_bip,
+	'add_vrrp_sv'=>\&opt_vrrp_sv,
+	'del_vrrp_sv'=>\&opt_vrrp_sv,
+	'add_vrrp'  =>	\&opt_vrrp,
+	'del_vrrp'  =>	\&opt_del_vrrp,
+	'edit_vrrp' =>	\&opt_vrrp,
+	'add_static_ip'	=>  \&opt_add_static_ip,
+	'del_static_ip'	=>  \&opt_del_static_ip,
+	'get_static_ip'	=>  \&no_opt,
+	'get_dev_bip'	=> \&no_opt,
+
+	'enable_vip'=>\&opt_vip,
+	'disable_vip'=>\&opt_vip,
+
+	'upload_config'=>\&no_opt,
+	'upload_alarm_config'=>\&no_opt,
+	'download_config'=>\&no_opt,
+	'backup_config'=>\&no_opt,
+	'reload_keepalived'=>\&opt_keepalived,
+
+	'get_conf_all_sv'=>\&no_opt,
+	'get_conf_sv'=>\&opt_sv,
+	'get_conf_vs'=>\&opt_vs,
+	'get_conf_rs'=>\&opt_sv_vs,
+	'get_conf_bip'=>\&opt_sv_vs,
+	'get_bvs_vs'=>\&no_opt,
+	'get_bvs_rs'=>\&opt_vs,
+	'get_bvs_bip'=>\&opt_vs,
+
+	'total_add_rs'=>\&opt_total_add_rs,
+	'total_add_cluster_vip'=>\&opt_total_add_cluster_vip,
+	'lvs_rollback'	    =>	\&no_opt,
+	'do_lvs_backup'	    =>	\&no_opt,
+	'add_alarm' =>	\&opt_add_alarm,
+	'del_alarm' =>  \&opt_del_alarm
+);
+
+###########################
+# Defautl lvs vrrp cofnig #
+###########################
+
+my %default_lvs_config_vrrp = (
+    'state' =>	'MASTER',
+    'interface'	=>  'eth0',
+    'virtual_router_id'	=>  '100',
+    'priority'	=>  '110',
+    'advert_int'    =>	'1',
+    'auth_type'	=>  'PASS',
+    'auth_pass'	=>  '1111',
+#    'brd'	=>  'NULL'
+);
+
+my %config_lvs_vrrp_check_opt = (
+    'vip'   =>	\&is_ip,
+#    'mask'  =>	\&is_net_mask,
+    'vrrp_instance' =>	\&is_vrrp_name,
+    'state' =>	\&is_vrrp_stat,
+    'interface'	=> \&is_if_name,
+    'virtual_router_id'	=> \&is_vrrp_router_id,
+    'priority'	=>  \&is_vrrp_priority,
+#    'brd'	=>  \&is_brd,
+);
+########################
+# Default config Values
+########################
+my %default_config_vs =
+(
+	'delay_loop'=>'6',
+	'lb_algo'=>'wrr',
+	'lb_kind'=>'NAT',
+	'protocol'=>'TCP',
+	'rs_alive_ratio_up'=>'1',
+	'rs_alive_ratio_down'=>'0',
+	'priority_delta'=>'30',
+	'addback_time'=>'15',
+	'pattern'=>'NULL',
+	'virtualhost'=>'NULL',
+	'vgroup_name'=>'NULL',
+	'ip_blist'=>'NULL'
+);
+
+my %config_vs_check_opt =
+(
+	'delay_loop'=>\&is_uns_int,
+	'lb_algo'=>\&is_lb_algo,
+	'lb_kind'=>\&is_lb_kind,
+	'protocol'=>\&is_protocol,
+	'rs_alive_ratio_up'=>\&is_ratio,
+	'rs_alive_ratio_down'=>\&is_ratio,
+	'priority_delta'=>\&is_uns_int,
+	'addback_time'=>\&is_uns_int,
+	'pattern'=>\&is_pattern,
+	'virtualhost'=>\&is_virtualhost,
+	'vgroup_name'=>\&is_vgrpname,
+	'ip_blist'=>\&is_uns_int
+);
+
+my %default_config_rs =
+(
+	'checker'=>'NO_CHECK',
+	'weight'=>'1',
+	'inhibit_on_failure'=>'1'
+);
+
+my %default_config_tcp_check =
+(
+	'connect_port'=>'',
+	'connect_timeout'=>'5',
+	'connect_retry'=>'3'
+);
+
+my %config_tcp_check_opt =
+(
+	'connect_port'=>\&is_port,
+	'bindto'=>\&is_ip,
+	'connect_timeout'=>\&is_uns_int,
+	'connect_retry'=>\&is_uns_int
+);
+
+my %default_config_http_check =
+(
+	'url_path'=>'/status.html',
+	'url_digest'=> 'eff5bc1ef8ec9d03e640fc4370f5eacd',
+	'connect_port'=>'',
+	'connect_timeout'=>'5',
+	'nb_get_retry'=>3,
+	'delay_before_retry'=>'3',
+	'status_code'=>''
+);
+
+my %config_http_check_opt =
+(
+	'url_path'=>\&is_string,
+	'url_digest'=>\&is_string,
+	'url_status_code'=>\&is_uns_int,
+	'connect_port'=>\&is_port,
+	'bindto'=>\&is_ip,
+	'connect_timeout'=>\&is_uns_int,
+	'nb_get_retry'=>\&is_uns_int,
+	'delay_before_retry'=>\&is_uns_int,
+	'status_code'=>\&is_status_code
+);
+
+my %default_config_misc_check =
+(
+	'misc_path'=>'/',
+	'misc_timeout'=>'5'
+);
+
+my %config_misc_check_opt =
+(
+	'misc_path'=>\&misc_check_path_convert,
+	'misc_timeout'=>\&is_uns_int,
+	'misc_dynamic'=>\&is_zero_one
+);
+my %misc_check_path_vaild =
+(
+      '0' 	=>\&is_string,
+      '1'	=>	\&is_ip,
+      '2'	=>\&is_ports,
+      '3'	=>\&is_num,
+      '4'	=>\&is_num
+);
+
+##################
+# Global Vars
+##################
+my $misc_check_split_symbol= "-";
+my $misch_check_path_para_num=5;
+my $num_of_param = 0;
+
+# each line of the main config file is loaded in @main_config_file
+my @main_config_file=();
+my @new_main_config_file=();
+
+my @services = ();
+
+# the included sub config file to use
+my $sub_config_file_name;
+my @sub_config_file=();
+my @new_sub_config_file=();
+my @system_config_file = ();
+my @alarm_service_file = ();
+
+my $flag_main_config_modified = 0;
+my $flag_sub_config_modified = 0;
+
+my $curr_dir = "";
+my $host_name = "";
+my $cluster_name = "";
+##################
+# Basic functions
+##################
+sub misc_check_path_convert($)
+{
+	my $str="";
+	my $rip="";
+	my $check_path;
+	my @path_info ={};
+	my $ret;
+	my $tmp;
+	my $func;
+	my $i;
+
+	$str=$_[0];
+	$rip=$_[1];
+	@path_info=split /$misc_check_split_symbol/,$str;
+ 	if($misch_check_path_para_num!=$#path_info+1){
+		return -1;
+	}
+	if( not defined $path_info[1] or "" eq $path_info[1]){
+                $path_info[1] = "$rip";
+        }
+	for ($i=0;$i<$misch_check_path_para_num;$i++){
+		$ret=$misc_check_path_vaild{$i}($path_info[$i]);
+		if($ret != 1){
+			return -1;
+		}
+	}
+	foreach $tmp (@path_info){
+		$tmp=~s/:/ /g;
+		if(not defined $check_path){
+		    $check_path=$tmp;
+		}else{
+		    $check_path=$check_path ." ". $tmp;
+		}
+	}
+	$check_path="\"".$check_path."\"";
+	return 2,$check_path;
+		
+}
+sub load_main_config
+{
+	@main_config_file=`$CAT_CMD $main_config_file_path`;
+	return $?;
+}
+
+sub load_sub_config($)
+{
+	@sub_config_file=`$CAT_CMD $_[0]`;
+	return $?;
+}
+
+sub load_system_config
+{
+    @system_config_file = `$CAT_CMD $system_conf_patch`;
+    return $?
+}
+
+sub load_alarm_config
+{
+    @alarm_service_file = `$CAT_CMD $alarm_service_conf`;
+    return $?;
+}
+
+sub dump_config_file($$)
+{
+	if(! open(FD,">$_[0]"))
+	{
+		return -1;
+	}
+
+	if($_[1])
+	{
+		print FD @new_main_config_file;
+	}
+	else
+	{
+		print FD @new_sub_config_file;
+	}
+	close(FD);
+	return 0;
+}
+
+sub service_exists($)
+{
+	foreach my $service (@services)
+	{
+		if("$_[0]" eq "$service")
+		{
+			return 1;
+		}
+	}
+	return 0;
+}
+
+sub get_all_services
+{
+	my $count = 0;
+	foreach my $line (@main_config_file)
+	{
+		if($line =~ /^\s*include\s+([a-zA-Z0-9\-\_\.]+)\.conf/)
+		{
+			$count ++;
+			push(@services, $1);
+		}
+	}
+	return $count;
+}
+
+#$_[0] Log Level
+#$_[1] Log Message
+sub bvs_mgr_log($$)
+{
+	my $date = get_localtime();
+	open(LOGFD, ">>$log_path");
+	print LOGFD "$date bvs_mgr \[$_[0]\]:	$_[1]\n";
+	close(LOGFD);
+}
+
+# $_[0] array: main_config_file or sub_config_file
+# $_[1] start_line_number
+# $_[2] stop_line_number
+# $_[3] pattern
+# $return the line_number-1 if the pattern is in the array
+# $return -1 if the patthern is not in the array
+# $return -2 if the parameter error
+sub get_line_number
+{
+	my($array, $start, $end, $pattern) = @_;
+
+	if($$start > $$end or $$start < 0 or $$end > @$array) {
+		return -2;
+	}
+
+	my $i;
+	for($i=$$start; $i<=$$end; $i++)
+	{
+		if("$$array[$i]" =~ /$$pattern/) {
+			return $i;
+		}
+	}
+	return -1;
+}
+
+#################################
+# Check & Init options functions
+#################################
+my %opt_err_num_msg =
+(
+	'101'=>"Invalid number of parameters",
+	'102'=>"Invalid parameters",
+	'103'=>"Invalid Value of Parameters",
+	'104'=>"Invalid command",
+	'105'=>"Invalid current path"
+);
+
+## Check whether some info exists and given a valid value.
+sub check_sv
+{
+	my ($hashref) = @_;
+	if (not defined($hashref->{"service_name"}))
+	{
+		return 102;
+	}
+	if(is_service_name($hashref->{"service_name"})) # /^[a-zA-Z0-9\-\_\.]+$/
+	{
+		return 0;
+	}
+	return 103;
+}
+
+sub check_vrrp_sv
+{
+	my ($hashref) = @_;
+	if (not defined($hashref->{"vrrp_name"}))
+	{
+		return 102;
+	}
+	if(is_service_name($hashref->{"vrrp_name"})) # /^[a-zA-Z0-9\-\_\.]+$/
+	{
+		return 0;
+	}
+	return 103;
+}
+
+sub check_vrrp($)
+{
+    my ($hashref) = @_;
+    if ((not defined($hashref->{"vrrp_instance"})) or 
+	(not defined($hashref->{"virtual_router_id"})) or 
+	(not defined($hashref->{"state"})) or 
+	(not defined($hashref->{"priority"})) or 
+	(not defined($hashref->{"vip"})) or 
+#	(not defined($hashref->{"mask"})) or 
+	(not defined($hashref->{"interface"}))) {
+#	print "vrrp_instance: $hashref->{'vrrp_instance'}\n";
+#	print "virtual_router_id: $hashref->{'virtual_router_id'}\n";
+#	print "state: $hashref->{'state'}\n";
+#	print "priority: $hashref->{'priority'}\n";
+#	print "vip: $hashref->{'vip'}\n";
+#	print "mask: $hashref->{'mask'}\n";
+#	print "interface: $hashref->{'interface'}\n";
+	return 102;
+    }
+    if ((not is_vrrp_name($hashref->{"vrrp_instance"})) or 
+	(not is_vrrp_router_id($hashref->{"virtual_router_id"})) or 
+	(not is_vrrp_stat($hashref->{"state"})) or 
+	(not is_vrrp_priority($hashref->{"priority"})) or 
+	(not is_ip($hashref->{"vip"})) or 
+#	(not is_net_mask($hashref->{"mask"})) or 
+	(not is_if_name($hashref->{"interface"}))) {
+#	print "vrrp_instance: $hashref->{'vrrp_instance'}\n";
+#	print "virtual_router_id: $hashref->{'virtual_router_id'}\n";
+#	print "state: $hashref->{'state'}\n";
+#	print "priority: $hashref->{'priority'}\n";
+#	print "vip: $hashref->{'vip'}\n";
+#	print "mask: $hashref->{'mask'}\n";
+#	print "interface: $hashref->{'interface'}\n";
+#	print "vrrp check false\n";
+	return 103
+    }
+    return 0;
+}
+
+
+sub check_vs
+{
+	my ($hashref) = @_;
+	if ((not defined($hashref->{"vip"})) or (not defined($hashref->{"vport"})))
+	{
+		return 102;
+	}
+
+	if (not (is_ip($hashref->{"vip"}) and is_port($hashref->{"vport"})))
+	{
+		return 103;
+	}
+	if (defined($hashref->{"protocol"}))
+	{
+		if(is_protocol($hashref->{"protocol"}))
+		{
+			return 0;
+		}
+		else
+		{
+			return 103;
+		}
+	}
+	return 0;
+}
+
+sub check_rs
+{
+	my ($hashref) = @_;
+	if ((not defined($hashref->{"rip"})) or (not defined($hashref->{"rport"})))
+	{
+		return 102;
+	}
+
+	if (not (is_ip($hashref->{"rip"}) and is_port($hashref->{"rport"})))
+	{
+		return 103;
+	}
+	return 0;
+}
+
+sub check_sv_and_vs
+{
+	my $check;
+	my ($hashref) = @_;
+	$check = check_sv($hashref);
+	if($check ne 0)
+	{
+		return $check;
+	}
+	$check = check_vs($hashref);
+	if($check ne 0)
+	{
+		return $check;
+	}
+	return 0;
+}
+
+sub init_tcp_checker
+{
+	my ($hashref) = @_;
+	foreach my $opt (keys(%$hashref))
+	{
+		if(defined($config_tcp_check_opt{$opt}))
+		{
+			my $ret = $config_tcp_check_opt{$opt}($hashref->{$opt});
+			if($ret eq 1)
+			{
+				$default_config_tcp_check{$opt} = $hashref->{$opt};
+			}
+			else
+			{
+				return 103;
+			}
+		}
+		else
+		{
+			return 102;
+		}
+	}
+	return 0;
+}
+
+sub init_misc_checker
+{
+	my ($hashref) = @_;
+	my $str;
+	my @ret;
+	my $rip= $hashref->{"rip"};
+	delete $hashref->{"rip"};
+	foreach my $opt (keys(%$hashref))
+	{	
+		if(defined($config_misc_check_opt{$opt}))
+		{
+			@ret = $config_misc_check_opt{$opt}($hashref->{$opt},$rip);
+			if($ret[0] eq 1)
+			{
+				$default_config_misc_check{$opt} = $hashref->{$opt};
+			}
+			elsif ($ret[0] eq 2){
+				$default_config_misc_check{$opt} = $ret[1];	
+			}
+			else
+			{
+			    return 103;
+			}
+		}
+		else
+		{
+			return 102;
+		}
+	}
+	return 0;
+}
+
+sub init_http_checker
+{	
+	my ($hashref) = @_;
+	foreach my $opt (keys(%$hashref))
+	{
+		if(defined($config_http_check_opt{$opt}))
+		{
+			my $ret = $config_http_check_opt{$opt}($hashref->{$opt});
+			if($ret eq 1)
+			{
+				$default_config_http_check{$opt} = $hashref->{$opt};
+			}
+			else
+			{
+				return 103;
+			}
+		}
+		else
+		{
+			return 102;
+		}
+	}
+	if (defined $default_config_http_check{"status_code"} and $default_config_http_check{"status_code"} ne "" ){
+		delete $default_config_http_check{"url_digest"};
+	}else  	{
+		if($default_config_http_check{"url_digest"} eq  ""){
+			$default_config_http_check{"url_digest"}="eff5bc1ef8ec9d03e640fc4370f5eacd";
+		}
+		delete $default_config_http_check{"status_code"};
+	}
+	return 0;
+}
+
+sub init_rs_checkers
+{
+	my ($hashref) = @_;
+	my $checker = $default_config_rs{"checker"};
+	my %checker_opt = %$hashref;
+	my $ret;
+	if($checker eq "NO_CHECK")
+	{
+		my @tmp;
+		delete($checker_opt{"checker"});
+		@tmp = keys(%checker_opt);
+		if($#tmp >= 0)
+		{
+			return 102;
+		}
+		return 0;
+	}
+	delete($checker_opt{"checker"});
+	if ($checker eq "TCP_CHECK")
+	{
+		delete $checker_opt{"rip"};
+		return init_tcp_checker(\%checker_opt);
+	}
+	elsif ($checker eq "HTTP_GET")
+	{
+		delete $checker_opt{"rip"};
+		return init_http_checker(\%checker_opt);
+	}
+	elsif ($checker eq "SSL_GET")
+	{
+		delete $checker_opt{"rip"};
+		return init_http_checker(\%checker_opt);
+	}
+	elsif ($checker eq "MISC_CHECK")
+	{
+		return init_misc_checker(\%checker_opt);
+	}
+	else
+	{
+		return 103;
+	}
+}
+
+sub no_opt
+{
+	if($num_of_param ne 0)
+	{
+		return 101;
+	}
+	return 0;
+}
+
+sub opt_keepalived
+{
+	my ($hashref) = @_;
+	my $this_process;
+	if($num_of_param ne 0 and $num_of_param ne 1)
+	{
+		return 101;
+	}
+	if (not defined($hashref->{'process'}))
+	{
+		if ($num_of_param eq 1)
+		{
+			return 102;
+		}
+		$hashref->{'process'} = "all";
+	}
+	if(is_keepalived_process($hashref->{'process'}))
+	{
+		return 0;
+	}
+	return 103;
+}
+
+sub opt_vrrp()
+{
+    my ($hashref) = @_;
+    if ($num_of_param ne 7) {
+	return 101;
+    }
+    return check_vrrp($hashref);
+}
+
+sub opt_add_static_ip()
+{
+    my ($hashref) = @_;
+    if ($num_of_param ne 3) {
+	return 101;
+    }
+    if (not defined $hashref->{"static_ip"} or 
+	not defined $hashref->{"dev"} or 
+	not defined $hashref->{"mask"}) {
+	return 102;
+    }
+    if (not is_ip($hashref->{"static_ip"}) or 
+	not is_if_name($hashref->{"dev"}) or 
+	not is_net_mask($hashref->{"mask"})) {
+#	print "static_ip: $hashref->{'static_ip'}\n";
+#	print "dev: $hashref->{'dev'}\n";
+#	print "mask: $hashref->{'mask'}\n";
+    
+	return 103
+    }
+    return 0;
+}
+
+sub opt_del_static_ip()
+{
+    my ($hashref) = @_;
+    if ($num_of_param ne 1) {
+	return 101
+    }
+    if (not defined $hashref->{"static_ip"}) {
+	return 102;
+    }
+    if (not is_ip($hashref->{"static_ip"})) {
+	return 103;
+    }
+    return 0;
+}
+
+sub opt_del_vrrp()
+{
+    my ($hashref) = @_;
+    if ($num_of_param ne 2) {
+	return 101;
+    }
+    if (not defined($hashref->{"vip"}))
+    {
+	return 102;
+    }
+    if(is_ip($hashref->{"vip"}))
+    {
+	return 0;
+    }
+    return 103;
+}
+
+sub opt_vip
+{
+	my ($hashref) = @_;
+	if($num_of_param ne 1)
+	{
+		return 101;
+	}
+	if (not defined($hashref->{"vip"}))
+	{
+		return 102;
+	}
+	if(is_ip($hashref->{"vip"}))
+	{
+		return 0;
+	}
+	return 103;
+}
+
+sub opt_sv
+{
+	my ($hashref) = @_;
+	if($num_of_param ne 1)
+	{
+		return 101;
+	}
+	return check_sv($hashref);
+}
+
+sub opt_vrrp_sv()
+{
+    my ($hashref) = @_;
+    if($num_of_param ne 1) {
+	return 101;
+    }
+    return check_vrrp_sv($hashref);
+}
+
+sub opt_sv_vs
+{
+	my ($hashref) = @_;
+	my $check;
+	if($num_of_param ne 3 and $num_of_param ne 4)
+	{
+		return 101;
+	}
+	$check = check_sv_and_vs($hashref);
+	if($check ne 0)
+	{
+		return $check;
+	}
+	if($num_of_param eq 4)
+	{
+		if (not defined($hashref->{"protocol"}))
+		{
+			return 102;
+		}
+	}
+	else
+	{
+		$hashref->{"protocol"} = "TCP";
+	}
+	return 0;
+}
+
+sub opt_vs
+{
+	my ($hashref) = @_;
+	my $check;
+	if($num_of_param ne 2 and $num_of_param ne 3)
+	{
+		return 101;
+	}
+	$check = check_vs($hashref);
+	if($check ne 0)
+	{
+		return $check;
+	}
+	if($num_of_param eq 3)
+	{
+		if (not defined($hashref->{"protocol"}))
+		{
+			return 102;
+		}
+	}
+	else
+	{
+		$hashref->{"protocol"} = "TCP";
+	}
+	return 0;
+}
+
+sub opt_add_edit_vs
+{
+	my ($hashref) = @_;
+	my $check;
+	my %tmp_hash;
+	if($num_of_param < 3)
+	{
+		return 101;
+	}
+	$check = check_sv_and_vs($hashref);
+	if($check ne 0)
+	{
+		return $check;
+	}
+
+	if (not defined($hashref->{"protocol"}))
+	{
+		$hashref->{"protocol"} = "TCP";
+	}
+
+	# Copy the parmaeters here.
+	%tmp_hash = %$hashref;
+	delete($tmp_hash{"vip"});
+	delete($tmp_hash{"vport"});
+	delete($tmp_hash{"service_name"});
+	foreach my $key (keys(%tmp_hash))
+	{
+		if(not defined($default_config_vs{$key}))
+		{
+			return 102;
+		}
+		$check = $config_vs_check_opt{$key}($tmp_hash{$key});
+		if ($check ne 1)
+		{
+			return 103;
+		}
+		else
+		{
+			$default_config_vs{$key} = $tmp_hash{$key};
+		}
+	}
+	return 0;
+}
+
+sub opt_add_bip
+{
+	my ($hashref) = @_;
+	my $check;
+	my %tmp_hash;
+	if($num_of_param ne 6 and $num_of_param ne 7)
+	{
+		return 101;
+	}
+	$check = check_sv_and_vs($hashref);
+	if($check ne 0)
+	{
+		return $check;
+	}
+	if (not defined($hashref->{"protocol"}))
+	{
+		if($num_of_param eq 7)
+		{
+			return 102;
+		}
+		$hashref->{"protocol"} = "TCP";
+	}
+	if ((not defined($hashref->{"bip"})) or (not defined($hashref->{"dev"})) or (not defined($hashref->{"mask"})))
+	{
+		return 102;
+	}
+	if(not (is_ip($hashref->{"bip"}) and is_dev($hashref->{"dev"}) and is_mask($hashref->{"mask"})))
+	{
+		return 103;
+	}
+	return 0;
+}
+
+sub opt_del_bip
+{
+	my ($hashref) = @_;
+	my $check;
+	my %tmp_hash;
+	if($num_of_param ne 4 and $num_of_param ne 5)
+	{
+		return 101;
+	}
+	$check = check_sv_and_vs($hashref);
+	if($check ne 0)
+	{
+		return $check;
+	}
+	if (not defined($hashref->{"protocol"}))
+	{	
+		if($num_of_param eq 5)
+		{
+			return 102;
+		}
+		$hashref->{"protocol"} = "TCP";
+	}
+	if (not defined($hashref->{"bip"}))
+	{
+		return 102;
+	}
+	if(not is_ip($hashref->{"bip"}))
+	{
+		return 103;
+	}
+	return 0;
+}
+
+sub opt_sv_vs_add_rs
+{
+	my ($hashref) = @_;
+	my %tmp_hash = %$hashref;
+	my $check;
+	my $ret;
+
+	if($num_of_param < 5)
+	{
+		return 101;
+	}
+	$check = check_sv_and_vs($hashref);
+	if($check ne 0)
+	{
+		return $check;
+	}
+	if (not defined($hashref->{"protocol"}))
+	{
+		$hashref->{"protocol"} = "TCP";
+	}
+	
+	$check = check_rs($hashref);
+	if($check ne 0)
+	{
+		return $check;
+	}
+	if (defined($hashref->{"checker"}))
+	{
+		if(is_checker($hashref->{"checker"}))
+		{
+			$default_config_rs{"checker"} = $hashref->{"checker"};
+			delete($tmp_hash{"checker"});
+		}
+		elsif($hashref->{"checker"} eq "NO_CHECK")
+		{
+			$default_config_rs{"checker"} = $hashref->{"checker"};
+			delete($tmp_hash{"checker"});
+		}
+		else
+		{
+			return 103;
+		}
+	}
+	if (defined($hashref->{"weight"}))
+	{
+		if(is_uns_int($hashref->{"weight"}))
+		{
+			$default_config_rs{"weight"} = $hashref->{"weight"};
+			delete($tmp_hash{"weight"});
+		}
+		else
+		{
+			return 103;
+		}
+	}
+
+	if (defined($hashref->{"inhibit_on_failure"}))
+	{
+		if(is_zero_one($hashref->{"inhibit_on_failure"}))
+		{
+			$default_config_rs{"inhibit_on_failure"} = $hashref->{"inhibit_on_failure"};
+			delete($tmp_hash{"inhibit_on_failure"});
+		}
+		else
+		{
+			return 103;
+		}
+	}
+
+	# Copy the parmaeters here.
+	delete($tmp_hash{"vip"});
+	delete($tmp_hash{"vport"});
+	delete($tmp_hash{"protocol"});
+	delete($tmp_hash{"service_name"});
+	delete($tmp_hash{"rport"});
+        $ret=init_rs_checkers(\%tmp_hash);
+	return $ret;
+}
+
+sub opt_sv_vs_del_rs
+{
+	my ($hashref) = @_;
+	my $check;
+	my %tmp_hash;
+	if($num_of_param ne 5 and $num_of_param ne 6)
+	{
+		return 101;
+	}
+	$check = check_sv_and_vs($hashref);
+	if($check ne 0)
+	{
+		return $check;
+	}
+	if (not defined($hashref->{"protocol"}))
+	{
+		if($num_of_param eq 6)
+		{
+			return 102;
+		}
+		$hashref->{"protocol"} = "TCP";
+	}
+
+	$check = check_rs($hashref);
+	if($check ne 0)
+	{
+		return $check;
+	}
+	return 0;
+}
+
+sub opt_total_add_rs 
+{
+	return 0;
+}
+
+sub opt_total_add_cluster_vip
+{
+	return 0;
+}
+
+sub opt_add_alarm
+{
+    my ($hashref) = @_;
+    if ($num_of_param ne 2 and $num_of_param ne 3 and $num_of_param ne 4) {
+	return 101;
+    }
+    if (not defined $hashref->{"vip"}) {
+	return 102;
+    } elsif (not (is_ip($hashref->{"vip"}))) {
+	return 103;	
+    } 
+    if (not defined $hashref->{"service_name"}) {
+	$hashref->{"service_name"} = "";
+    }
+    $hashref->{"virtualhost"} = $hashref->{"service_name"};
+    delete $hashref->{"service_name"};
+    if (not defined $hashref->{"sms_alarm"}) {
+	$hashref->{"sms_alarm"} = "sys_lvs_alarm";
+    }
+    if (not defined $hashref->{"email_alarm"}) {
+	$hashref->{"email_alarm"} = "sys_lvs_alarm_emailonly";
+    }
+    return 0;
+}
+
+sub opt_del_alarm
+{
+    my ($hashref) = @_;
+    if ($num_of_param ne 1) {
+	return 101;
+    }
+    if (not defined $hashref->{"vip"}) {
+	return 102;
+    } elsif (not (is_ip($hashref->{"vip"}))) {
+	return 103;
+    }
+    return 0;
+}
+
+##########################
+# BVS operation functions
+##########################
+my %op_ret_num_msg =
+(
+	'-1'=>"Error in create file",
+	'-2'=>"Error in delete file",
+	'-3'=>"Error in cp file",
+	'0'=>"Success",
+	'1'=>"ssh run cmd error",
+	'2'=>"scp error",
+	'3'=>"ssh to delete remote file error",
+	'11'=>"Virtual Server does not exist",
+	'12'=>"Virtual Server already exists",
+	'21'=>"Backend IP does not exist",
+	'22'=>"Backend IP already exists",
+	'23'=>"Backend IP exists but bind with different mask or dev",
+	'31'=>"Main Config File format error!",
+	'32'=>"Sub Config File format error!",
+	'41'=>"Real Server does not exist!",
+	'42'=>"Real Server already exists!",
+	'51'=>"Service does not exist!",
+	'52'=>"Service already exists!",
+	'61'=>"Load Main Config File error!",
+	'62'=>"Load Sub Config File error!",
+	'99'=>"This bvs node is being used.",
+	'71'=>"Vrrp does not exist!",
+	'72'=>"Vrrp already exists!",
+	'81'=>"Static ip does not exist!",
+	'82'=>"Static ip already exists!",
+	'201'=>"Pid file does not exist",
+	'202'=>"Get invalid pid",
+	'203'=>"Error in kill -HUP",
+	'210'=>"Remote ipvsadm command error",
+	'211'=>"Remote ip addr command error",
+	'212'=>"Remote /etc/rc.d/rc.local modify error",
+	'213'=>"Remote /etc/rc.d/rc.local back up error",
+	'221'=>"Remote /proc/sys/bvs/ip_vs doesn not exist",
+	'222'=>"Remote /proc/sys/bvs/ip_vs read error",
+	'231'=>"Remote can't find the virtual server"
+);
+
+# add a new service
+# $_[0] parameter in hash
+# return: check %op_ret_num_msg for return value;
+sub add_service($)
+{
+	my ($hashref) = @_;
+	my $ret;
+	my $service_file = $hashref->{"service_name"}.".conf";
+	@new_main_config_file = @main_config_file;
+	push(@new_main_config_file, "include $service_file\n");
+	$ret = `$TOUCH_CMD $service_file 2>&1`;
+	if ($? ne 0 or $ret ne "")
+	{
+		bvs_mgr_log("ERROR", "add_service failed: can not touch $service_file [$?:$ret]\n");
+		print ("$ret");
+		return -1;
+	}
+	$flag_main_config_modified = 1;
+	return 0;
+}
+
+# del a service
+# $_[0] parameter in hash
+# return: check %op_ret_num_msg for return value;
+sub del_service($)
+{
+	my ($hashref) = @_;
+	my $ret;
+	my $service_file = $hashref->{"service_name"}.".conf";
+	
+	foreach my $line (@main_config_file)
+	{
+		if($line !~ /^\s*include\s+$service_file/)
+		{
+			push(@new_main_config_file, $line);
+		}
+	}
+	$ret = unlink($service_file);
+	if ($ret ne 1) {
+		return -2;
+	}
+	$flag_main_config_modified = 1;
+	return 0;
+}
+
+# add a new vrrp service
+# $_[0] parameter in hash
+# return: check %op_ret_num_msg for return value;
+sub add_vrrp_service($)
+{
+	my ($hashref) = @_;
+	my $ret;
+	my $service_file = $hashref->{"vrrp_name"}.".conf";
+	@new_main_config_file = @main_config_file;
+	push(@new_main_config_file, "include $service_file\n");
+	$ret = `$TOUCH_CMD $service_file 2>&1`;
+	if ($? ne 0 or $ret ne "")
+	{
+		bvs_mgr_log("ERROR", "add_vrrp_service faile: cat not touch $service_file [$?:$ret]");
+		print ("$ret");
+		return -1;
+	}
+	$flag_main_config_modified = 1;
+	return 0;
+}
+
+# del a service
+# $_[0] parameter in hash
+# return: check %op_ret_num_msg for return value;
+sub del_vrrp_service($)
+{
+	my ($hashref) = @_;
+	my $ret;
+	my $service_file = $hashref->{"vrrp_name"}.".conf";
+	foreach my $line (@main_config_file)
+	{
+		if($line !~ /^\s*include\s+$service_file/)
+		{
+			push(@new_main_config_file, $line);
+		}
+	}
+	$ret = unlink($service_file);
+	if ($ret ne 1) {
+		return -2;
+	}
+	$flag_main_config_modified = 1;
+	return 0;
+}
+
+sub lvs_alarm()
+{
+    my ($hashref) = @_;
+    my @ret = ('');
+    @ret = `$SSH_CMD $host_name sudo $remote_alarm $hashref->{'alarm'}`;
+    my $rv = $?>>8;
+    if ($rv ne 0 or $ret[0] !~ /Success/) {
+	bvs_mgr_log("ERROR", "lvs alarm failed: ssh cmd failed [$?:$ret[0]]");
+	print ("@ret");
+	if (defined($op_ret_num_msg{$rv})) {
+	    return $rv;
+	} else {
+	    return 1;
+	}
+    }
+    return 0;
+}
+
+# reload keepalived process
+sub reload_keepalived
+{
+	my ($hashref) = @_;
+	my @ret = ('');
+	@ret = `$SSH_CMD $host_name sudo $remote_reload_keepalived $hashref->{'process'}`;
+	my $rv = $?>>8;
+	if ($rv ne 0 or $ret[0] !~ /Finish/)
+	{
+		print("@ret");
+		bvs_mgr_log("ERROR", "reload_keepalived failed: [$?:$ret[0]]");
+		if(defined($op_ret_num_msg{$rv}))
+		{
+			return $rv;
+		}
+		else
+		{
+			return 1;
+		}
+	}
+	return 0;
+}
+
+# add vip on lo
+# $return $success or $fail
+sub enable_vip
+{
+	my ($hashref) = @_;
+	my @ret = ('');
+	@ret = `$SSH_CMD $host_name sudo $remote_vip_adm add $hashref->{'vip'}`;
+	my $rv = $?>>8;
+	if ($rv ne 0 or $ret[$#ret] !~ /Success/)
+	{
+		bvs_mgr_log("ERROR", "enable_vip failed: [$?:$ret[$#ret]]");
+		print("@ret");
+		if(defined($op_ret_num_msg{$rv}))
+		{
+			return $rv;
+		}
+		else
+		{
+			return 1;
+		}
+	}
+	return 0;
+}
+
+# del vip on lo
+sub disable_vip
+{
+	my ($hashref) = @_;
+	my @ret = ('');
+	@ret = `$SSH_CMD $host_name sudo $remote_vip_adm del $hashref->{'vip'}`;
+	my $rv = $?>>8;
+	if ($rv ne 0 or $ret[$#ret] !~ /Success/)
+	{
+		bvs_mgr_log("ERROR", "disable_vip failed: [$?:$ret[$#ret]]");
+		print ("@ret");
+		if(defined($op_ret_num_msg{$rv}))
+		{
+			return $rv;
+		}
+		else
+		{
+			return 1;
+		}
+	}
+	return 0;
+}
+
+# upload config
+sub upload_config()
+{
+#	my $rm = `$SSH_CMD $host_name $RM_CMD -f $remote_conf_path/*.conf`;
+#	if ($? ne 0)
+#	{
+#		bvs_mgr_log("ERROR", "cleanup remote config faile: [$?:$rm]");
+#		return 3;
+#	}
+	my @init_cmd = `$SSH_CMD $host_name '[ -d $remote_conf_path_tmp ] && sudo $RM_CMD -rf $remote_conf_path_tmp; sudo /bin/mkdir -p $remote_conf_path_tmp && sudo chmod 777 -R $remote_conf_path_tmp'`;
+	if ($? ne 0) {
+		bvs_mgr_log("ERROR", "cleanup remote $remote_conf_path_tmp faile: [$?:$init_cmd[0]]");
+		return 3;
+	}
+	my @ret=`/bin/tar cvf keepalived.tar.gz *; $SCP_CMD keepalived.tar.gz $host_name:$remote_conf_path_tmp 2>&1; /bin/rm -rf keepalived.tar.gz`;
+	if($? ne 0)
+	{
+	    	bvs_mgr_log("ERROR", "upload_config faile: [$?:$ret[0]]");
+		print ("$ret[0]]");
+		return 2;
+	}
+	my @do_cmd = `$SSH_CMD $host_name 'sudo $RM_CMD -f $remote_conf_path/*; sudo /bin/tar xvf $remote_conf_path_tmp/keepalived.tar.gz -C $remote_conf_path; sudo $RM_CMD -rf $remote_conf_path_tmp'`;
+	if ($? ne 0) {
+		bvs_mgr_log("ERROR", "do config online faile: [$?:$do_cmd[0]]");
+		return 2;
+	}
+	return 0;
+}
+
+# upload alarm config
+sub upload_alarm_config()
+{
+	my $rm = `$SSH_CMD $host_name sudo $RM_CMD -f $remote_alarm_path/alarm_service.conf`;
+	if ($? ne 0)
+	{
+		bvs_mgr_log("ERROR", "cleanup remote alarm config faile: [$?:$rm]");
+		return 3;
+	}
+	my @ret=`$SCP_CMD ../alarm_service.conf $host_name:$remote_alarm_path 2>&1`;
+	if($? ne 0)
+	{
+		bvs_mgr_log("ERROR", "upload_alarm_config failed: [$?:$ret[0]]");
+		print ("@ret");
+		return 2;
+	}
+	return 0;
+}
+
+# download config
+sub download_config()
+{	
+	my $rm = `$RM_CMD -f *.conf`;
+	if ($? ne 0)
+	{
+		bvs_mgr_log("ERROR", "cleanup local config failed:[$?:$rm]");
+		return -2;
+	}
+	my @ret=`$SCP_CMD $host_name:$remote_conf_path/*.conf ./ 2>&1`;
+	if($? ne 0)
+	{
+		bvs_mgr_log("ERROR", "scp remote config to local failed: [$?:$ret[0]]");
+		print ("@ret");
+		return 2;
+	}
+	return 0;
+
+}
+
+sub backup_config()
+{
+	my $ret = back_up_file($curr_dir, "$local_conf_bak_path/$cluster_name");
+	if ($ret ne 0)
+	{
+		bvs_mgr_log("ERROR", "backup_config failed: [$?:$ret]");
+		print ("$ret");
+		return -3;
+	}
+	return 0;
+}
+
+sub remote_backup_config()
+{
+#    my $remote_cmd = "time=\$(date +%Y-%m-%d-%H-%M-%S); sudo /bin/mkdir -p $remote_backup_path/\$time; cd $remote_conf_path; sudo /bin/tar cvf keepalived.tar.gz * > /dev/null 2>&1; sudo /bin/mv -f keepalived.tar.gz $remote_backup_path/\$time;";
+    my $remote_cmd = "[ ! -d $remote_last_config ] && sudo /bin/mkdir -p $remote_last_config; { cd $remote_conf_path && sudo /bin/tar cvf keepalived.tar.gz * > /dev/null && sudo /bin/mv -f keepalived.tar.gz $remote_last_config; }";
+    print "$SSH_CMD $host_name '$remote_cmd'\n";
+    my $ret = `$SSH_CMD $host_name '$remote_cmd'`;
+    if ($? ne 0) {
+	bvs_mgr_log("ERROR", "remote_backup_config failed: [$?:$ret]");
+	print ("$ret");
+	return -3;
+    }
+    return 0;
+}
+
+sub do_lvs_backup()
+{
+    my $remote_cmd = "time=\$(date +%Y-%m-%d-%H-%M-%S) && sudo /bin/mkdir -p $remote_backup_path/\$time && sudo /bin/cp -f $remote_last_config/keepalived.tar.gz $remote_backup_path/\$time;";
+    my $ret = `$SSH_CMD $host_name '$remote_cmd'`;
+    if ($? ne 0) {
+	bvs_mgr_log("ERROR", "do_lvs_backup failed: [$?:$ret]");
+	print ("$ret");
+	return -3;
+    }
+    return 0;
+}
+
+sub lvs_rollback
+{
+    my $remote_cmd = "sudo /bin/rm -rf $remote_conf_path/* && sudo /bin/tar xvf $remote_last_config/keepalived.tar.gz -C $remote_conf_path > /dev/null";
+    my $ret = `$SSH_CMD $host_name '$remote_cmd'`;
+    if ($? ne 0) {
+	bvs_mgr_log("ERROR", "lvs_rollback failed: [$?:$ret]");
+	print ("$ret");
+	return -3;
+    }
+    return 0;
+}
+
+sub is_alarm_exist($)
+{
+    my $vip = $_[0];
+    my $ret = -1;
+    my $start = 0;
+    my $end = $#alarm_service_file;
+    my $pattern = "^$vip:*";
+    my $line = get_line_number(\@alarm_service_file, \$start, \$end, \$pattern); 
+    
+    if ($line < $start) {
+	$ret = -1;
+    } else {
+	$ret = $line;
+    }
+    return $ret;
+}
+
+sub add_alarm
+{
+    my ($hashref) = @_;
+    my $vip = $hashref->{"vip"};
+    my $virtual_host = $hashref->{"virtualhost"};
+    my $sms_alarm =  $hashref->{"sms_alarm"};
+    my $email_alarm = $hashref->{"email_alarm"};
+
+    $virtual_host =~ s/\-+/_/g;
+    my $ret = is_alarm_exist($vip);
+    if ($ret < 0) {
+	my $line = "$vip:$virtual_host:$sms_alarm:$email_alarm\n";
+	push(@alarm_service_file, $line);
+    }
+    if(! open(FD,">$alarm_service_conf")) {
+	return -1;
+    }
+    print FD @alarm_service_file;
+    close(FD);
+    return 0;
+}
+
+sub del_alarm
+{
+    my ($hashref) = @_;
+    my $vip = $hashref->{"vip"};
+    my $line = -1;
+    my @tmp = ();
+    my $ret = is_alarm_exist($vip);
+    my $n = 0;
+    
+    if(! open(FD,">$alarm_service_conf")) {
+	return -1;
+    }
+
+    if ($ret < 0) {
+	@tmp = @alarm_service_file;
+	print FD @tmp;
+	close(FD);
+	return 1;
+    } else {
+	while ($n <= $#alarm_service_file) {
+	    if ($n != $ret) {
+		print "alarm service: $alarm_service_file[$n]\n";
+		push(@tmp, $alarm_service_file[$n]);
+	    }
+	    $n ++;
+	}
+    }
+
+    print FD @tmp;
+    close(FD);
+    return 0;
+}
+
+## $_[0]
+## $_[1]
+## $_[2]
+## return
+sub vs_is_exist($$$)
+{
+	my $vip = $_[0];
+	my $vport = $_[1];
+	my $protocol = $_[2];
+
+	my @ret = (-1, -1);
+
+	my $start = 0;
+	my $end = $#sub_config_file;
+	my $pattern_start = "\^\\s*virtual_server\\s+$vip\\s+$vport\\s+\\{\$";
+	my $pattern_end = "\^\\}\\s*!\\s*virtual_server\\s+$vip\\s+$vport\\s*\$";
+	my $pattern_proto = "\^\\s*protocol\\s+$protocol\\s*\$";
+	while(1)
+	{
+		$start = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_start);
+		$end = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_end);
+		## vs do not exist, and break...
+		if(0 > $start or $start >= $end or $end > $#sub_config_file) {
+			return @ret;
+		}
+		my $tmp = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_proto);
+
+		if(0 <= $start and $start < $tmp and $tmp < $end and $end <= $#sub_config_file) {
+		## the protocol is currect, vs is exitst...
+			$ret[0] = $start;
+			$ret[1] = $end;
+			return @ret;
+		} else {
+		## the protocol is no currect, and try next...
+			$start = $end + 1;
+			$end = $#sub_config_file;
+		}
+	}
+}
+
+sub vrrp_is_exist($)
+{
+    my $vip = $_[0];
+    my @ret = (-1, -1);
+
+    my $start = 0;
+    my $end = $#sub_config_file;
+    my $pattern_start = "^!vrrp_instance\\s+$vip\\s*\$";
+    my $pattern_end = "^\\}\\s+!\\s*vrrp_instance\\s+$vip\\s*\$";
+    
+    $start = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_start);
+    $end = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_end);
+## vs do not exist, and break...
+    if(0 > $start or $start >= $end or $end > $#sub_config_file) {
+        return @ret;
+    }
+    $ret[0] = $start;
+    $ret[1] = $end;    
+    return @ret;
+}
+
+sub add_vrrp()
+{
+    my ($hashref) = @_;
+    my $vrrp_name = $hashref->{"vrrp_instance"};
+    my $router_id = $hashref->{"virtual_router_id"};
+    my $state = $hashref->{"state"};
+    my $priority = $hashref->{"priority"};
+    my $vip = $hashref->{"vip"};
+#    my $mask = $hashref->{"mask"};
+    my $interface = $hashref->{"interface"};
+#    my $brd = $hashref->{"brd"};
+
+## if the vrrp exist ??
+    my @ret = vrrp_is_exist($vip);
+    my $start = $ret[0];
+    my $end = $ret[1];
+## vrrp already defined    
+    if(0 <= $start and $start < $end and $end <= $#sub_config_file) {
+	bvs_mgr_log("WARN", "vrrp $vrrp_name is already defined!\n");
+	return 82;
+    }
+
+## copy the Front part from sub_config_file to new_sub_config_file
+    my $count = 0;
+    while ($count <= $#sub_config_file) {
+	print "sub config: $sub_config_file[$count]\n";
+	push(@new_sub_config_file, $sub_config_file[$count]);
+	$count++;
+    }
+
+## copy the vrrp to new_sub_config_file
+    push(@new_sub_config_file, "!vrrp_instance $vip\n");
+    push(@new_sub_config_file, "vrrp_instance $vrrp_name {\n");
+    push(@new_sub_config_file, "\tstate $state\n");
+    push(@new_sub_config_file, "\tinterface $interface\n");
+    push(@new_sub_config_file, "\tvirtual_router_id $router_id\n");
+    push(@new_sub_config_file, "\tpriority $priority\n");
+    push(@new_sub_config_file, "\tadvert_int $default_lvs_config_vrrp{'advert_int'}\n\n");
+    push(@new_sub_config_file, "\tauthentication {\n");
+    push(@new_sub_config_file, "\t\tauth_type $default_lvs_config_vrrp{'auth_type'}\n");
+    push(@new_sub_config_file, "\t\tauth_pass $default_lvs_config_vrrp{'auth_pass'}\n\t}\n");
+    push(@new_sub_config_file, "\tvirtual_ipaddress {\n");
+    #push(@new_sub_config_file, "\t\t$vip/$mask brd $brd dev $interface\n\t}\n");
+    push(@new_sub_config_file, "\t\t$vip\n\t}\n");
+    push(@new_sub_config_file, "} !vrrp_instance $vip\n\n");
+
+## set flag
+    $flag_sub_config_modified = 1;
+
+    return 0;
+}
+
+sub del_vrrp()
+{
+    my ($hashref) = @_;
+
+    my $vip = $hashref->{"vip"};
+
+## if the vs exist ??
+    my @ret = vrrp_is_exist($vip);
+    my $start = $ret[0];
+    my $end = $ret[1];
+
+## vs do not exist, and exit...
+    if($start < 0 or $end < 0) {
+	bvs_mgr_log("WARN", "vrrp $vip is not exist!\n");
+	return 11;
+    }
+
+## if the vrrp instance exist ??
+    my $pattern_start = "\^\\s*!vrrp_instance\\s+$vip\\s*\$";
+    my $pattern_end = "\^\\s*\\}\\s+!vrrp_instance\\s+$vip\\s*\$";
+
+    $start = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_start);
+    $end = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_end);
+
+## rs does not exist, and exit...
+    if(0 > $start or $start >= $end or $end > $#sub_config_file) {
+	bvs_mgr_log("WARN", "vrrp $vip is not exist\n");
+	return 81;
+    }
+
+## copy the rest from sub_config_file to new_sub_config_file
+    my $count = 0;
+    while ($count <= $#sub_config_file) {
+	if($count < $start or $count > $end) {
+	    push(@new_sub_config_file, $sub_config_file[$count]);
+	}
+	$count++;
+    }
+## copy end
+
+## set flag
+    $flag_sub_config_modified = 1;
+    return 0;
+}
+
+sub edit_vrrp()
+{
+    my ($hashref) = @_;
+    my $i;
+    
+    my $vrrp_name = $hashref->{"vrrp_instance"};
+    my $router_id = $hashref->{"virtual_router_id"};
+    my $state = $hashref->{"state"};
+    my $priority = $hashref->{"priority"};
+    my $vip = $hashref->{"vip"};
+#    my $mask = $hashref->{"mask"};
+    my $interface = $hashref->{"interface"};
+#    my $brd = $hashref->{"brd"};
+
+## if the vs exists?
+    my @ret = vrrp_is_exist($vip);
+    my $start = $ret[0];
+    my $end = $ret[1];
+## vs do not exist, and exit...
+    if($start < 0 or $end < 0)
+    {
+	bvs_mgr_log("WARN", "vrrp $vip is not exist\n");
+	return 11;
+    }
+
+    for ($i = 0; $i <= $start; $i ++)
+    {
+	push(@new_sub_config_file, $sub_config_file[$i]);
+    }
+    
+    delete($hashref->{"service_name"});
+    for ($i = $start + 1; $i < $end; $i ++)
+    {
+	#if ($sub_config_file[$i] =~ /(\d+\.\d+\.\d+\.\d+\s)\/([0-9]+)+brd\s+(\d+\.\d+\.\d+\.\d+)\s+dev\s+.*/) {
+	if($sub_config_file[$i] =~ /^\s*\!/)
+	{
+	    push(@new_sub_config_file, $sub_config_file[$i]);
+	}
+	elsif ($sub_config_file[$i] =~ /^vrrp_instance\s+\w+\s+{/) {
+	    if (defined($hashref->{"vrrp_instance"})) {
+		push(@new_sub_config_file, "vrrp_instance $hashref->{'vrrp_instance'} {\n");
+		delete($hashref->{"vrrp_instance"});
+	    } 
+	    else {
+		push(@new_sub_config_file, $sub_config_file[$i]);
+	    }
+	} 
+	#elsif ($sub_config_file[$i] =~ /(\d+\.\d+\.\d+\.\d+)\/(\d+)\s+brd\s+(\d+\.\d+\.\d+\.\d+)\s+dev\s+/) {
+	elsif ($sub_config_file[$i] =~ /(\d+\.\d+\.\d+\.\d+)/) {
+	    if(defined($hashref->{"vip"})) 
+#		defined($hashref->{"mask"}) and 
+#		defined($hashref->{"brd"}) and 
+#		defined($hashref->{"interface"})) 
+	    {   
+#		push(@new_sub_config_file, "\t\t$hashref->{'vip'}/$hashref->{'mask'} brd $hashref->{'brd'} dev $hashref->{'interface'}\n");
+		push(@new_sub_config_file, "\t\t$hashref->{'vip'}\n");
+		$flag_sub_config_modified = 1;
+		delete($hashref->{"vip"});
+#		delete($hashref->{"mask"});
+#		delete($hashref->{"brd"});
+#		delete($hashref->{"interface"});
+	    }
+	    else
+	    {   
+		push(@new_sub_config_file, $sub_config_file[$i]);
+	    }
+	} 
+	elsif($sub_config_file[$i] =~ /^\s*(\w+)\s+([\d|\w]+)/)
+	{
+	    if(defined($hashref->{$1}))
+	    {
+		push(@new_sub_config_file, "\t$1 $hashref->{$1}\n");
+		$flag_sub_config_modified = 1;
+		delete($hashref->{$1});
+	    }
+	    else
+	    {
+		push(@new_sub_config_file, $sub_config_file[$i]);
+	    }
+	}
+	elsif($sub_config_file[$i] =~ /^\s*$/)
+	{
+	    next;
+	}
+
+	else
+	{
+	    bvs_mgr_log("WARN", "$host_name edit_vrrp vip=$vip, strange format.");
+	    push(@new_sub_config_file, $sub_config_file[$i]);
+	}
+    }
+
+    foreach my $key (keys %$hashref)
+    {
+	if ($key eq 'vrrp_name') {
+	    next;
+	}
+	if($key eq 'pattern')
+	{
+	    if($hashref->{$key} eq 'NULL')
+	    {
+		next;
+	    }
+	}
+	push(@new_sub_config_file, "\t$key $hashref->{$key}\n");
+    }
+    push(@new_sub_config_file, "\n");
+    for ($i = $end; $i <= $#sub_config_file; $i ++)
+    {
+	push(@new_sub_config_file, $sub_config_file[$i]);
+    }
+    return 0;
+}
+
+
+# add a virtual server
+sub add_vs
+{   
+	my ($hashref) = @_;
+
+	my $vip = $hashref->{"vip"};
+	my $vport = $hashref->{"vport"};
+	my $protocol = $hashref->{"protocol"};
+	my $key;
+	my $value;
+
+    	## if the vs exist ??
+	my @ret = vs_is_exist($vip, $vport, $protocol);
+	my $start = $ret[0];
+	my $end = $ret[1];
+    
+	## vs already exist, and exit...
+	if($start >= 0 or $end >= 0) {
+		bvs_mgr_log("WARN", "vs [$vip:$vport:$protocol] is already exist\n");
+		return 12;
+	}
+
+	@new_sub_config_file = @sub_config_file;
+
+	## add vs to the end of the sub_config_file
+	push(@new_sub_config_file, "virtual_server $vip $vport {\n");
+	while (($key, $value) = each(%default_config_vs)) {
+		if($key eq 'pattern' or $key eq 'virtualhost')
+		{
+			if($value ne "NULL")
+			{
+				push(@new_sub_config_file, "\t$key \"$value\"\n");
+			}
+			next;
+		} elsif ($key eq 'vgroup_name' or $key eq 'ip_blist') {
+			if ($value ne 'NULL') {
+				push(@new_sub_config_file, "\t$key $value\n");
+			}
+			next;
+		}
+		push(@new_sub_config_file, "\t$key $value\n");
+	}
+	push(@new_sub_config_file, "\n");
+	push(@new_sub_config_file, "$BIP_START_INFO");
+	push(@new_sub_config_file, "$BIP_END_INFO");
+	push(@new_sub_config_file, "\n");
+	push(@new_sub_config_file, "$RS_START_INFO");
+	push(@new_sub_config_file, "$RS_END_INFO");
+	push(@new_sub_config_file, "\n");
+	push(@new_sub_config_file, "} !virtual_server $vip $vport\n");
+
+	$flag_sub_config_modified = 1;
+	return 0;
+}
+
+# del an virtual server
+sub del_vs
+{
+	my ($hashref) = @_;
+
+	my $vip = $hashref->{"vip"};
+	my $vport = $hashref->{"vport"};
+	my $protocol = $hashref->{"protocol"};
+
+	## if the vs exist ??
+
+	my @ret = vs_is_exist($vip, $vport, $protocol);
+	my $start = $ret[0];
+	my $end = $ret[1];
+	## vs do not exist, and exit...
+	if($start < 0 or $end < 0) {
+		bvs_mgr_log("WARN", "vs [$vip:$vport:$protocol] is not exist\n");
+		return 11;
+	}
+
+	## copy the rest from sub_config_file to new_sub_config_file
+	my $count = 0;
+	while ($count <= $#sub_config_file) {
+		if($count < $start or $count > $end) {
+			push(@new_sub_config_file, $sub_config_file[$count]);
+		}
+		$count++;
+	}
+	
+	## set flag
+	$flag_sub_config_modified = 1;
+	
+	return 0;
+}
+
+# edit a virutal server
+sub edit_vs
+{	
+	my ($hashref) = @_;
+	my $i;
+	my $vip = $hashref->{"vip"};
+	my $vport = $hashref->{"vport"};
+	my $protocol = $hashref->{"protocol"};
+	my $service_name = $hashref->{"service_name"};
+
+	## if the vs exists?
+	my @ret = vs_is_exist($vip, $vport, $protocol);
+	my $start = $ret[0];
+	my $end = $ret[1];
+	## vs do not exist, and exit...
+	if($start < 0 or $end < 0)
+	{
+		bvs_mgr_log("WARN", "vs [$vip:$vport:$protocol] is not exist\n");
+		return 11;
+	}
+
+	for ($i = 0; $i <= $start; $i ++)
+	{
+		push(@new_sub_config_file, $sub_config_file[$i]);
+	}
+
+	## if the format is correct ?? 
+	my $pattern_start = "\^\\s*!back_ipaddress start here\\s*\$";
+	my $opt_end = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_start);
+	if ($opt_end < 0 or $opt_end > $#sub_config_file)
+	{
+		bvs_mgr_log("ERROR", "bad format of [$vip:$vport:$protocol] back_ipaddress");
+		return 32;
+	}
+
+	delete($hashref->{"vip"});
+	delete($hashref->{"vport"});
+	delete($hashref->{"protocol"});
+	delete($hashref->{"service_name"});
+
+	for ($i = $start + 1; $i < $opt_end; $i ++)
+	{
+		if($sub_config_file[$i] =~ /^\s*(\w+)\s+([\d|\w]+)/)
+		{
+			if(defined($hashref->{$1}))
+			{
+				push(@new_sub_config_file, "\t$1 $hashref->{$1}\n");
+				$flag_sub_config_modified = 1;
+				delete($hashref->{$1});
+			}
+			else
+			{
+				push(@new_sub_config_file, $sub_config_file[$i]);
+			}
+		}
+		elsif($sub_config_file[$i] =~ /^\s*$/)
+		{
+			next;
+		}
+		elsif($sub_config_file[$i] =~ /^\s*\!/)
+		{
+			push(@new_sub_config_file, $sub_config_file[$i]);
+		}
+		else
+		{
+			bvs_mgr_log("WARN", "$host_name edit_vs service=$service_name, $vip:$vport $protocol, strange format.");
+			push(@new_sub_config_file, $sub_config_file[$i]);
+		}
+	}
+
+	foreach my $key (keys %$hashref)
+	{
+		if($key eq 'pattern')
+		{
+			if($hashref->{$key} eq 'NULL')
+			{
+				next;
+			}
+		}
+		push(@new_sub_config_file, "\t$key $hashref->{$key}\n");
+	}
+	push(@new_sub_config_file, "\n");
+	for ($i = $opt_end; $i <= $#sub_config_file; $i ++)
+	{
+		push(@new_sub_config_file, $sub_config_file[$i]);
+	}
+	return 0;
+}
+
+sub add_static_ip()
+{
+    my ($hashref) = @_;
+
+    my $static_ip = $hashref->{"static_ip"};
+    my $dev = $hashref->{"dev"};
+    my $mask = $hashref->{"mask"};
+
+    my $dump_header = 1;
+
+## if the bip exist in main_config_file
+    my $pattern_start = "\^\\s*static_ipaddress\\s+\\{\$";
+    my $pattern_end = "\^\\s*\\}\\s+!\\s*static_ipaddress\\s*\$";
+
+    my $start = 0;
+    my $end = $#main_config_file;
+    $start = get_line_number(\@main_config_file, \$start, \$end, \$pattern_start);
+    $end = get_line_number(\@main_config_file, \$start, \$end, \$pattern_end);
+
+## format error, and exit...
+    if(0 > $start or $start >= $end or $end > $#main_config_file) {
+	bvs_mgr_log("ERROR", "bad static ip format in keepalived.conf");
+	return 31;
+    }
+
+## if the static_ipaddress to be added exist ??
+    my $i;
+    for($i = $start+1; $i < $end; $i ++) {
+	if($main_config_file[$i] =~ /^\s*$static_ip\/(.*)\s+dev\s+(\w+)\s*$/) {
+	    my $tmp_mask = $1;
+	    my $tmp_dev = $2;
+	    if($tmp_mask !~ /$mask/ or $tmp_dev !~ /$dev/) {
+		bvs_mgr_log("ERROR", "unmatch dev or mask in keepalived.conf");
+		return 23;
+	    }
+	    return 72;
+	}
+    }
+
+## copy the Front part from main_config_file to new_main_config_file
+    my $count = 0;
+    while ($count < $end) {
+	push(@new_main_config_file, $main_config_file[$count]);
+	$count++;
+    }
+
+## add the static_ipaddress to new_main_config_file
+    push(@new_main_config_file, "\t$static_ip\/$mask dev $dev\n");
+
+## copy the Last part from main_config_file to new_main_config_file
+    $count = $end;
+    while ($count <= $#main_config_file) {
+	push(@new_main_config_file, $main_config_file[$count]);
+	$count++;
+    }
+## copy end
+
+## set flag
+    $flag_main_config_modified = 1;
+    return 0;
+
+}
+
+sub del_static_ip()
+{
+    my ($hashref) = @_;
+
+    my $static_ip = $hashref->{"static_ip"};
+    my $used = 0;
+    my $i = 0;
+
+# Modify main config file now
+## if the bip exist in main_config_file
+    my $pattern_start = "\^\\s*static_ipaddress\\s+\\{\$";
+    my $pattern_end = "\^\\s*\\}\\s+!\\s*static_ipaddress\\s+\$";
+
+    my $start = 0;
+    my $end = $#main_config_file;
+    $start = get_line_number(\@main_config_file, \$start, \$end, \$pattern_start);
+    $end = get_line_number(\@main_config_file, \$start, \$end, \$pattern_end);
+## format error, and exit...
+    if(0 > $start or $start >= $end or $end > $#main_config_file) {
+	bvs_mgr_log("ERROR", "bad static ip format in keepalived.conf");
+	return 31;
+    }
+
+    for($i = 0; $i <= $start; $i ++) {
+	push(@new_main_config_file, $main_config_file[$i]);
+    }
+    
+    for($i = $start + 1; $i < $end; $i++) {
+        if($main_config_file[$i] !~ /^\s*$static_ip.*\s+dev\s+/) {
+            push(@new_main_config_file, $main_config_file[$i]);
+        } else {
+            $flag_main_config_modified = 1; 
+	}
+    }    
+
+    for($i = $end; $i <= $#main_config_file; $i ++) {
+	push(@new_main_config_file, $main_config_file[$i]);
+    }
+    if($flag_main_config_modified eq 0) {
+	bvs_mgr_log("ERROR", "$static_ip doesn't exist in static_ipaddress!\n");
+    } else {
+	bvs_mgr_log("INFO", "del $static_ip from staic_ipaddress success\n");
+    }
+    return 0;
+}
+
+sub get_static_ip()
+{
+    my ($hashref) = @_;
+    my @static_ip = ();
+    my $flag_in_bip = 0;
+
+    foreach my $line (@main_config_file) {
+	if($line =~ /^\s*static_ipaddress\s+\{/) {
+	    $flag_in_bip = 1;
+	    next;
+	}
+	if($line =~ /^\s*\}\s*!\s*static_ipaddress/) {
+	    $flag_in_bip = 0;
+	    last;
+	}
+	if($line =~ /^\s*(\d+\.\d+\.\d+\.\d+.*)\s+dev\s+(\w+)\s*/ and $flag_in_bip eq 1) {
+	    push(@static_ip, "$1  dev  $2\n");
+	    next;
+	}
+    }
+
+    if($#static_ip >= 0) {
+	foreach my $s_ip (@static_ip) {
+	    print($s_ip);
+	}
+    }
+    return 0;
+}
+
+sub get_dev_bip()
+{
+    my ($hashref) = @_;
+    my @bip = ();
+    my $flag_in_bip = 0;
+    
+    foreach my $line (@system_config_file) {
+	if ($line =~ /^\s*dev_bip\s*{/) {
+	    $flag_in_bip = 1;
+	    next;
+	}
+	if ($line =~ /^\s*\}\s*!\s*dev_bip/) {
+	    $flag_in_bip = 0;
+	    last;
+	}
+	if($line =~ /^\s*(\d+\.\d+\.\d+\.\d+.*)\s+dev\s+(\w+)\s*/ and $flag_in_bip eq 1) {    
+	    push(@bip, "$1 dev $2");
+	    next;
+	}
+    }
+    if ($#bip >= 0) {
+	foreach my $ip (@bip) {
+	    print ("$ip\n");
+	}
+    }
+    return 0;
+}
+
+# add a bip to a virtual server
+sub add_bip
+{	
+	my ($hashref) = @_;
+
+	my $vip = $hashref->{"vip"};
+	my $vport = $hashref->{"vport"};
+	my $protocol = $hashref->{"protocol"};
+	my $bip = $hashref->{"bip"};
+	my $dev = $hashref->{"dev"};
+	my $mask = $hashref->{"mask"};
+	my $service_name = $hashref->{"service_name"};
+
+	my $dump_header = 1;
+
+	## if the vs exist ??
+	my @ret = vs_is_exist($vip, $vport, $protocol);
+	my $start = $ret[0];
+	my $end = $ret[1];
+
+	## vs do not exist, and exit...
+	if($start < 0 or $end < 0) {
+		bvs_mgr_log("ERROR", "vs [$vip:$vport:$protocol] does not exist");
+		return 11;
+	}
+
+	## if the format is correct ?? 
+	my $pattern_start = "\^\\s*!back_ipaddress start here\\s*\$";
+	my $pattern_end =   "\^\\s*!back_ipaddress end here\\s*\$";
+
+	$start = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_start);
+	$end = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_end);
+
+	## format error, and exit...
+	if(0 > $start or $start >= $end or $end > $#sub_config_file) {
+		bvs_mgr_log("ERROR", "bad bip format in $service_name");
+		return 32;
+	}
+
+	## if any back_ipaddress exist ??
+	$pattern_start = "\^\\s*back_ipaddress\\s+\\{\$";
+	$pattern_end = "\^\\s*\\}\\s+!back_ipaddress\\s*\$";
+
+	my $tmp_start = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_start);
+	my $tmp_end = get_line_number(\@sub_config_file, \$tmp_start, \$end, \$pattern_end);
+
+	## some back_ipaddress already exist...
+	if($start <= $tmp_start and $tmp_start <= $tmp_end and $tmp_end <= $end) {
+		$start = $tmp_start;
+		$end = $tmp_end;
+		$dump_header = 0;
+
+		## if the back_ipaddress to be added exist ??
+		$pattern_start = "\^\\s*$bip\\s*\$";
+		$start = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_start);
+		if(0 <= $start and $start <= $end and $end <= $#sub_config_file) {
+			bvs_mgr_log("WARN", "$bip is already exist in $service_name");
+			return 22;
+		}
+	}
+
+	## copy the Front part from sub_config_file to new_sub_config_file
+	my $count = 0;
+	while ($count < $end) {
+		push(@new_sub_config_file, $sub_config_file[$count]);
+		$count++;
+	}
+
+	## add the back_ipaddress to new_sub_config_file
+	if($dump_header == 0) {
+		push(@new_sub_config_file, "\t\t$bip\n");
+	} else {
+		push(@new_sub_config_file, "\tback_ipaddress {\n");
+		push(@new_sub_config_file, "\t\t$bip\n");
+		push(@new_sub_config_file, "\t} !back_ipaddress\n");
+	}
+
+	## copy the Last part from sub_config_file to new_sub_config_file
+	$count = $end;
+	while ($count <= $#sub_config_file) {
+		push(@new_sub_config_file, $sub_config_file[$count]);
+		$count++;
+	}
+	## copy end
+
+	## set flag
+	$flag_sub_config_modified = 1;
+
+	## if the bip exist in main_config_file
+	$pattern_start = "\^\\s*static_ipaddress\\s+\\{\$";
+	$pattern_end = "\^\\s*\\}\\s+!\\s*static_ipaddress\\s*\$";
+
+	$start = 0;
+	$end = $#main_config_file;
+	$start = get_line_number(\@main_config_file, \$start, \$end, \$pattern_start);
+	$end = get_line_number(\@main_config_file, \$start, \$end, \$pattern_end);
+
+	## format error, and exit...
+	if(0 > $start or $start >= $end or $end > $#main_config_file) {
+		bvs_mgr_log("ERROR", "bad static ip format in keepalived");
+		return 31;
+	}
+
+	## if the static_ipaddress to be added exist ??
+	my $i;
+	for($i = $start+1; $i < $end; $i ++) {
+		if($main_config_file[$i] =~ /^\s*$bip(.*)\s+dev\s+(\w+)\s*$/) {
+			my $tmp_mask = $1;
+			my $tmp_dev = $2;
+			if($tmp_mask !~ /$mask/ or $tmp_dev !~ /$dev/) {
+				bvs_mgr_log("ERROR", "mismatch dev or mask in keepalived");
+				return 23;
+			}
+			return 0;
+		}
+	}
+	
+	if ($dev =~ /null/) {
+	    return 0;
+	}
+
+	## copy the Front part from main_config_file to new_main_config_file
+	$count = 0;
+	while ($count < $end) {
+		push(@new_main_config_file, $main_config_file[$count]);
+		$count++;
+	}
+
+	## add the static_ipaddress to new_main_config_file
+	push(@new_main_config_file, "\t$bip\/$mask dev $dev\n");
+
+	## copy the Last part from main_config_file to new_main_config_file
+	$count = $end;
+	while ($count <= $#main_config_file) {
+		push(@new_main_config_file, $main_config_file[$count]);
+		$count++;
+	}
+	## copy end
+
+	## set flag
+	$flag_main_config_modified = 1;
+	return 0;
+}
+
+# del a bip from a virtual server
+sub del_bip 
+{
+	my ($hashref) = @_;
+
+	my $vip = $hashref->{"vip"};
+	my $vport = $hashref->{"vport"};
+	my $protocol = $hashref->{"protocol"};
+	my $bip = $hashref->{"bip"};
+	my $service_name = $hashref->{"service_name"};
+	my $used = 0;
+
+	## if the vs exist ??
+	my @ret = vs_is_exist($vip, $vport, $protocol);
+	my $start = $ret[0];
+	my $end = $ret[1];
+	my $i;
+	my $flag_in_bip = 0;
+
+	## vs does not exist, and exit...
+	if($start < 0 or $end < 0) {
+		bvs_mgr_log("ERROR", "bip $bip does not exist keepalived");
+		return 11;
+	}
+
+	for($i = 0; $i <= $start; $i ++) {
+		if($sub_config_file[$i] =~ /^\s*$bip\s*$/) {
+			$used = 1;
+		}
+		push(@new_sub_config_file, $sub_config_file[$i]);
+	}
+	for($i = $start + 1; $i < $end; $i ++) {
+		if($sub_config_file[$i] =~ /^\s*!back_ipaddress start here\s*$/ and $flag_in_bip eq 0) {
+			push(@new_sub_config_file, $sub_config_file[$i]);
+			$flag_in_bip = 1;
+			next;
+		}
+		if($sub_config_file[$i] =~ /^\s*!back_ipaddress end here\s*$/ and $flag_in_bip eq 1) {
+			push(@new_sub_config_file, $sub_config_file[$i]);
+			$flag_in_bip = 0;
+			next;
+		}
+
+		if($flag_in_bip eq 0) {
+			push(@new_sub_config_file, $sub_config_file[$i]);
+			next;
+		}
+		if($flag_in_bip eq 1) {
+			if($sub_config_file[$i] =~ /^\s*$bip\s*$/) {
+				$flag_sub_config_modified = 1;
+			} else {
+				push(@new_sub_config_file, $sub_config_file[$i]);
+			}
+			next;
+		}
+	}
+	
+	if ($flag_sub_config_modified eq 0) {
+		return 21;
+	}
+	for($i = $end; $i <= $#sub_config_file; $i ++) {
+		if($sub_config_file[$i] =~ /^\s*$bip\s*$/) {
+			$used = 1;
+		}
+		push(@new_sub_config_file, $sub_config_file[$i]);
+	}
+	if($used eq 1) { ## no need to touch main config file
+		return 0;
+	}
+
+	# Check whether the bip is used by others
+	foreach my $sv (@services) {
+		if($sv ne $service_name) {
+			my $load = load_sub_config("$sv.conf");
+			if($load ne 0) {
+				bvs_mgr_log("ERROR", "load sub config file $sv.conf failed, continue");
+				next;
+			}
+			foreach my $line (@sub_config_file) {
+				if ($line =~ /^\s*$bip\s*$/) {
+					$used = 1; 
+					last;
+				}
+			}
+		}
+		if($used eq 1) {
+			last;
+		}
+	}
+	if($used eq 1) { ## no need to touch main config file
+		return 0;
+	}
+
+	# Modify main config file now
+	## if the bip exist in main_config_file
+	my $pattern_start = "\^\\s*static_ipaddress\\s+\\{\$";
+	my $pattern_end = "\^\\s*\\}\\s+!\\s*static_ipaddress\\s+\$";
+
+	$start = 0;
+	$end = $#main_config_file;
+	$start = get_line_number(\@main_config_file, \$start, \$end, \$pattern_start);
+	$end = get_line_number(\@main_config_file, \$start, \$end, \$pattern_end);
+	## format error, and exit...
+	if(0 > $start or $start >= $end or $end > $#main_config_file) {
+		bvs_mgr_log("ERROR", "bad static ip format in keepalived");
+		return 31;
+	}
+
+	for($i = 0; $i <= $start; $i ++) {
+		push(@new_main_config_file, $main_config_file[$i]);
+	}
+	for($i = $start + 1; $i < $end; $i ++) {
+		if($main_config_file[$i] !~ /^\s*$bip.*\s+dev\s+/) {
+			push(@new_main_config_file, $main_config_file[$i]);
+		}
+		else {
+			$flag_main_config_modified = 1;
+		}
+	}
+	for($i = $end; $i <= $#main_config_file; $i ++) {
+		push(@new_main_config_file, $main_config_file[$i]);
+	}
+	if($flag_main_config_modified eq 0)
+	{
+		bvs_mgr_log("WARN", "$bip has been deleted from $vip:$vport, but it doesn't exist in static_ipaddress, continue.\n");
+	}
+	return 0;
+}
+
+# add a real server to a virtual server
+sub add_rs
+{	
+	my ($hashref) = @_;
+	my $vip = $hashref->{"vip"};
+	my $vport = $hashref->{"vport"};
+	my $protocol = $hashref->{"protocol"};
+
+	my $rip = $hashref->{"rip"};
+	my $rport = $hashref->{"rport"};
+	my $checker = $default_config_rs{"checker"};
+	delete($default_config_rs{"checker"});
+
+	## if the vs exist ??
+	my @ret = vs_is_exist($vip, $vport, $protocol);
+	my $start = $ret[0];
+	my $end = $ret[1];
+
+	## vs do not exist, and exit...
+	if($start < 0 or $end < 0) {
+		bvs_mgr_log("ERROR", "vs [$vip:$vport:$protocol] does not exist");
+		return 11;
+	}
+
+	## if the format is correct ?? 
+	my $pattern_start = "\^\\s*!real_server start here\\s*\$";
+	my $pattern_end =   "\^\\s*!real_server end here\\s*\$";
+
+	$start = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_start);
+	$end = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_end);
+	## format error, and exit...
+	if(0 > $start or $start >= $end or $end > $#sub_config_file) {
+		bvs_mgr_log("ERROR", "bad real_server farmat");
+		return 32;
+	}
+
+	my $rs_end_line = $end;
+
+	## if the rs exist ??
+	$pattern_start = "\^\\s*real_server\\s+$rip\\s+$rport\\s+\\{\$";
+	$pattern_end = "\^\\s*\\}\\s+!real_server\\s+$rip\\s+$rport\\s*\$";
+
+	$start = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_start);
+	$end = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_end);
+	## real server already exist, and exit...
+	if(0 <= $start and $start < $end and $end <= $#sub_config_file) {
+		bvs_mgr_log("WARN", "real server $rip:$vport is already exist");
+		return 42;
+	}
+
+	## copy the Front part from sub_config_file to new_sub_config_file
+	my $count = 0;
+	while ($count < $rs_end_line) {
+		push(@new_sub_config_file, $sub_config_file[$count]);
+		$count++;
+	}
+
+	## copy the rs to new_sub_config_file
+	my $key;
+	my $value;
+	push(@new_sub_config_file, "\treal_server $rip $rport {\n");
+	while(($key, $value) = each(%default_config_rs)) {
+		if($key eq "inhibit_on_failure") {
+			if($default_config_rs{$key} eq '1') {
+				push(@new_sub_config_file, "\t\t$key\n");
+			}
+		} else {
+			push(@new_sub_config_file, "\t\t$key $value\n");
+		}
+	}
+	
+	if($checker eq "TCP_CHECK") {
+		if($default_config_tcp_check{"connect_port"} eq '') {
+			$default_config_tcp_check{"connect_port"} = $rport;
+		}
+		push(@new_sub_config_file, "\t\tTCP_CHECK {\n");
+		while(($key, $value) = each(%default_config_tcp_check)) {
+			push(@new_sub_config_file, "\t\t\t$key $value\n");
+		}
+		push(@new_sub_config_file, "\t\t} !TCP_CHECK\n");
+	}
+	elsif($checker eq "MISC_CHECK") {
+		push(@new_sub_config_file, "\t\tMISC_CHECK {\n");
+		foreach $key (keys %default_config_misc_check) {
+			if($key eq "misc_dynamic" and $default_config_misc_check{$key} eq '1') {
+				push(@new_sub_config_file, "\t\t\t\t$key\n");
+			} else {
+				push(@new_sub_config_file, "\t\t\t$key $default_config_misc_check{$key}\n");
+			}
+		}
+		push(@new_sub_config_file, "\t\t} !MISC_CHECK\n");
+	}
+	elsif($checker eq "HTTP_GET" or $checker eq "SSL_GET") {
+		my $url_flag = 0;
+		my $url_key = "";
+		if($default_config_http_check{"connect_port"} eq '') {
+			$default_config_http_check{"connect_port"} = $rport;
+		}
+		push(@new_sub_config_file, "\t\t$checker {\n");
+		foreach $key (keys %default_config_http_check) {
+			if($key =~ /^url_(\w+)$/ or $key =~/^status_code$/) {
+				if($key =~/^status_code$/){
+					$url_key=$key;
+				}else{
+					$url_key = $1;
+				}
+				if($url_flag eq 0) {
+					push(@new_sub_config_file, "\t\t\turl {\n");
+					push(@new_sub_config_file, "\t\t\t\t$url_key	$default_config_http_check{$key}\n");
+					$url_flag = 1;
+				} else {
+					push(@new_sub_config_file, "\t\t\t\t$url_key	$default_config_http_check{$key}\n");
+				}
+			}
+		}
+		if ($url_flag eq 1) {
+			push(@new_sub_config_file, "\t\t\t} !url\n");
+		}
+		foreach $key (keys %default_config_http_check)
+		{
+			if($key !~ /^url_\w+$/ and $key !~ /^status_code$/) {
+				push(@new_sub_config_file, "\t\t\t$key	$default_config_http_check{$key}\n");
+			}
+		}
+		push(@new_sub_config_file, "\t\t} !$checker\n");
+	}
+
+	push(@new_sub_config_file, "\t} !real_server $rip $rport\n");
+
+	## copy the Last part from sub_config_file to new_sub_config_file
+	$count = $rs_end_line;
+	while ($count <= $#sub_config_file) {
+		push(@new_sub_config_file, $sub_config_file[$count]);
+		$count++;
+	}
+	## copy end
+
+	## set flag
+	$flag_sub_config_modified = 1;
+
+	return 0;
+}
+
+# del a real server from a virtual server
+sub del_rs
+{
+	my ($hashref) = @_;
+
+	my $vip = $hashref->{"vip"};
+	my $vport = $hashref->{"vport"};
+	my $rip = $hashref->{"rip"};
+	my $rport = $hashref->{"rport"};
+	my $protocol = $hashref->{"protocol"};
+
+	## if the vs exist ??
+	my @ret = vs_is_exist($vip, $vport, $protocol);
+	my $start = $ret[0];
+	my $end = $ret[1];
+
+	## vs do not exist, and exit...
+	if($start < 0 or $end < 0) {
+		return 11;
+	}
+
+	## if the rs exist ??
+	my $pattern_start = "\^\\s*real_server\\s+$rip\\s+$rport\\s+\\{\\s*\$";
+	my $pattern_end = "\^\\s*\\}\\s+!real_server\\s+$rip\\s+$rport\\s*\$";
+
+	$start = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_start);
+	$end = get_line_number(\@sub_config_file, \$start, \$end, \$pattern_end);
+	
+	## rs does not exist, and exit...
+	if(0 > $start or $start >= $end or $end > $#sub_config_file) {
+		bvs_mgr_log("WARN", "rs $rip:$rport does not defined in $vip:$vport");
+		return 41;
+	}
+			
+	## copy the rest from sub_config_file to new_sub_config_file
+	my $count = 0;
+	while ($count <= $#sub_config_file) {
+		if($count < $start or $count > $end) {
+			push(@new_sub_config_file, $sub_config_file[$count]);
+		}
+		$count++;
+	}
+	## copy end
+	
+	## set flag
+	$flag_sub_config_modified = 1;
+	return 0;
+}
+
+sub get_conf_all_sv
+{
+	foreach my $sv (@services)
+	{
+		print("$sv\n");
+	}
+	return 0;
+}
+
+sub get_conf_sv
+{
+	my ($hashref) = @_;
+	print("Virtual Server of Service $hashref->{'service_name'}:\n");
+	print("VIP:Vport		Protocol\n");
+	foreach my $line (@sub_config_file)
+	{
+		if($line =~ /^\s*virtual_server\s+(.*)\s+(.*)\s+\{/)
+		{
+			print("$1:$2	");
+			next;
+		}
+		if($line =~ /^\s*protocol\s+(\w+)/)
+		{
+			print("$1\n");
+			next;
+		}
+	}
+	return 0;
+}
+
+sub get_conf_vs
+{
+	my ($hashref) = @_;
+	my $vip = $hashref->{'vip'};
+	my $vport = $hashref->{'vport'};
+	my $proto = $hashref->{'protocol'};
+	my @rs = ();
+	my @se_lines = (-1, -1);
+	my $sv;
+	my $ret;
+	my $i;
+	foreach $sv (@services)
+	{
+		$ret = load_sub_config("$sv.conf");
+		if($ret ne 0)
+		{
+			print("Error in loading config for service: $sv, continue\n");
+			next;
+		}
+		@se_lines = vs_is_exist($vip, $vport, $proto);
+		if($se_lines[0] < 0 or $se_lines[1] < 0) 
+		{
+			$ret = 11;
+			next;
+		}
+		else
+		{
+			my $flag_in_bip = 0;
+			my $flag_in_rs = 0;
+			$ret = 0;
+			print("$sv=>$vip:$vport $proto\n");
+			print("Configurations:\n");
+			for($i = $se_lines[0]+1; $i <= $se_lines[1]; $i ++)
+			{
+				if($sub_config_file[$i] =~ /^\s*$BIP_START_INFO/)
+				{
+					$flag_in_bip = 1;
+					next;
+				}
+				if($sub_config_file[$i] =~ /^\s*$BIP_END_INFO/)
+				{
+					$flag_in_bip = 0;
+					next;
+				}
+				if($sub_config_file[$i] =~ /^\s*$RS_START_INFO/)
+				{
+					$flag_in_rs = 1;
+					next;
+				}
+				if($sub_config_file[$i] =~ /^\s*$RS_END_INFO/)
+				{
+					$flag_in_rs = 0;
+					next;
+				}
+				if($sub_config_file[$i] =~ /^\s*(\w+)\s+([\w,.]+)\s*/ and $flag_in_bip eq 0 and $flag_in_rs eq 0)
+				{
+					print ("$1=$2\n");
+					next;
+				}
+			}
+			last;
+		}
+	}
+	return $ret;
+}
+
+sub get_conf_rs
+{	
+	my ($hashref) = @_;
+	my $vip = $hashref->{'vip'};
+	my $vport = $hashref->{'vport'};
+	my $proto = $hashref->{'protocol'};
+	my $sv = $hashref->{'service_name'};
+	my @se_lines = (-1, -1);
+	my $ret;
+	my $i;
+
+	@se_lines = vs_is_exist($vip, $vport, $proto);
+	if($se_lines[0] < 0 or $se_lines[1] < 0) 
+	{
+		$ret = 11;
+	}
+	else
+	{
+		$ret = 0;
+		print("$sv=>$vip:$vport $proto\n");
+		print("Real Servers:\n");
+		for($i = $se_lines[0]+1; $i <= $se_lines[1]; $i ++)
+		{
+			if($sub_config_file[$i] =~ /^\s*real_server\s+(.*)\s+(.*)\s+\{/)
+			{
+				print("->$1:$2\n");
+			}
+		}
+	}
+	return $ret;
+}
+
+sub get_conf_bip
+{
+	my ($hashref) = @_;
+	my $vip = $hashref->{'vip'};
+	my $vport = $hashref->{'vport'};
+	my $proto = $hashref->{'protocol'};
+	my $sv = $hashref->{'service_name'};
+	my @bip = ();
+	my @sip = ();
+	my @se_lines = (-1, -1);
+	my $ret;
+	my $i;
+	my $flag_in_bip = 0;
+
+	@se_lines = vs_is_exist($vip, $vport, $proto);
+	if($se_lines[0] < 0 or $se_lines[1] < 0) 
+	{
+		$ret = 11;
+	}
+	else
+	{
+		$ret = 0;
+		print("$sv=>$vip:$vport $proto\n");
+		print("Backend IP Address:\n");
+		for($i = $se_lines[0]+1; $i <= $se_lines[1]; $i ++)
+		{
+			if($sub_config_file[$i] =~ /^\s*$BIP_START_INFO/)
+			{
+				$flag_in_bip = 1;
+				next;
+			}
+			if($sub_config_file[$i] =~ /^\s*$BIP_END_INFO/)
+			{
+				$flag_in_bip = 0;
+				last;
+			}
+			if($sub_config_file[$i] =~ /^\s*(\d+\.\d+\.\d+\.\d+)/ and $flag_in_bip eq 1)
+			{
+				push(@bip, $1);
+			}
+		}
+	}
+
+	if ($#bip >= 0)
+	{
+		$flag_in_bip = 0;
+		foreach my $line (@main_config_file)
+		{
+			if($line =~ /^\s*static_ipaddress\s+\{/)
+			{
+				$flag_in_bip = 1;
+				next;
+			}
+			if($line =~ /^\s*\}\s*!\s*static_ipaddress/)
+			{
+				$flag_in_bip = 0;
+				last;
+			}
+			if($line =~ /^\s*(\d+\.\d+\.\d+\.\d+.*)\s+dev\s+(\w+)\s*/ and $flag_in_bip eq 1)
+			{
+		 		push(@sip, "$1  dev  $2\n");
+				next;
+			}
+		}
+
+		if($#sip >= 0)
+		{
+			foreach my $b_ip (@bip)
+			{
+				foreach my $s_ip (@sip)
+				{
+					if($s_ip =~ /^$b_ip/)
+					{
+						print($s_ip);
+					}
+				}
+			}
+		}
+	}
+	return $ret;
+
+}
+
+#####################
+# Get Running Config
+#####################
+sub get_bvs_vs
+{
+	my ($hashref) = @_;
+	my $line;
+	my @vip = ();
+	my @vs = ();
+	my @ret_vs = ("");
+	my @ret_vip = ("");
+	@ret_vip = `$SSH_CMD $host_name sudo $remote_vip_adm get`;
+	my $rv = $?>>8;
+	if ($rv ne 0 or $ret_vip[$#ret_vip] !~ /Success/)
+	{
+		print("@ret_vip");
+		bvs_mgr_log("ERROR", "get_bvs_vs get failed");
+		if(defined($op_ret_num_msg{$rv}))
+		{
+			return $rv;
+		}
+		else
+		{
+			return 1;
+		}
+	}
+	pop(@ret_vip);
+
+	@ret_vs = `$SSH_CMD $host_name sudo $remote_show_vs`;
+	$rv = $?>>8;
+	if ($rv ne 0 or $ret_vs[$#ret_vs] !~ /Success/)
+	{
+		bvs_mgr_log("ERROR", "get_bvs_vs show failed");
+		print ("@ret_vs");
+		if(defined($op_ret_num_msg{$rv}))
+		{
+			return $rv;
+		}
+		else
+		{
+			return 1;
+		}
+	}
+	pop(@ret_vs);
+
+	foreach $line (@ret_vip)
+	{
+		if($line =~ /^\s+inet\s+(\d+\.\d+\.\d+\.\d+)\/32\s+/)
+		{
+			push(@vip, $1);
+		}
+	}
+	foreach $line (@ret_vs)
+	{
+		my $flag_enable = 0;
+		foreach my $ip (@vip)
+		{
+			if($line =~ /$ip/)
+			{
+				chomp($line);
+				$flag_enable = 1;	
+				print "$line enabled\n";
+				last;
+			}
+		}
+		if($flag_enable eq 0)
+		{
+			chomp($line);
+			print "$line disabled\n";
+		}
+	}
+	return 0;
+}
+
+sub get_bvs_rs
+{
+	my ($hashref) = @_;
+	my @ret_vs = ("");
+	@ret_vs = `$SSH_CMD $host_name sudo $remote_get_vs_rs $hashref->{'vip'} $hashref->{'vport'} $hashref->{'protocol'} 2>&1`;
+	my $rv = $?>>8;
+	if ($rv ne 0 or $ret_vs[$#ret_vs] !~ /Success/)
+	{
+		bvs_mgr_log("ERROR", "get_lvs_rs failed");
+		print ("@ret_vs");
+		if(defined($op_ret_num_msg{$rv}))
+		{
+			return $rv;
+		}
+		else
+		{
+			return 1;
+		}
+	}
+	pop(@ret_vs);
+	print @ret_vs;
+	return 0;
+}
+
+sub get_bvs_bip
+{
+	my ($hashref) = @_;
+	my @ret_vs = ("");
+	@ret_vs = `$SSH_CMD $host_name sudo $remote_get_backend_ip $hashref->{'vip'} $hashref->{'vport'} $hashref->{'protocol'} 2>&1`;
+	my $rv = $?>>8;
+	if ($rv ne 0 or $ret_vs[$#ret_vs] !~ /Success/)
+	{
+		bvs_mgr_log("ERROR", "get_lvs_bip failed");
+		print ("@ret_vs");
+		if(defined($op_ret_num_msg{$rv}))
+		{
+			return $rv;
+		}
+		else
+		{
+			return 1;
+		}
+	}
+	pop(@ret_vs);
+	print @ret_vs;
+	return 0;
+}
+
+sub total_add_rs
+{
+	my ($hashref) = @_;
+	my $vip = $hashref->{"vip"};
+	my $protocol = $hashref->{"protocol"};
+	my $rip = $hashref->{"rip"};
+	my $rport = $hashref->{"rport"};
+	my $checker = $hashref->{"checker"};
+
+	
+	return 0;
+}
+
+sub total_add_cluster_vip
+{
+	return 0;
+}
+
+sub dispatch_cmd
+{
+	my $cmd = $ARGV[0];
+	my %cmd_parameters = (); # save all the parameters of the cmd;
+	my $i;
+	my $service_num = 0;
+	my $service_name;
+	my $ret;
+	
+	if (defined($cmds_table{$cmd}))
+	{
+		my @tmp_parm = ();
+		# Valid cmd, initialize the parameters
+		for ($i = 1; $i <= $#ARGV; $i ++)
+		{
+			if($ARGV[$i] !~ /=/)#filte the pattern that not match '='
+			{
+				err_exit("$opt_err_num_msg{'102'}" , 102);
+			}
+			@tmp_parm = split('=', $ARGV[$i]);
+			$cmd_parameters{$tmp_parm[0]} = $tmp_parm[1];
+		}
+
+		if (defined($cmds_opt_init_table{$cmd}))
+		{   
+			$ret = $cmds_opt_init_table{$cmd}(\%cmd_parameters);
+			if($ret ne 0)
+			{
+				err_exit("$opt_err_num_msg{$ret}" , $ret);
+			}
+		}
+		
+		# Get current config and service_name
+		if ($cmd !~ /_config/ and $cmd !~ /get_bvs_/ and $cmd !~ /able_vip/ and $cmd !~ /keepalived/ and $cmd !~ /_alarm/)
+		{
+			$ret = load_main_config();
+			if($ret ne 0)
+			{
+				err_exit("$op_ret_num_msg{'61'}", 61);
+			}
+		}
+		if ($cmd =~ /get_dev_bip/) {
+		    $ret = load_system_config();
+		    if ($ret ne 0) {
+			err_exit("$op_ret_num_msg{'61'}", 61);
+		    }
+		}		
+		if ($cmd =~ /add_alarm/ or $cmd =~ /del_alarm/) {
+		    $ret = load_alarm_config();
+		    if ($ret ne 0) {
+			err_exit("$op_ret_num_msg{'61'}", 61);
+		    }
+		}
+
+		$service_num = get_all_services();
+		my $filename = "";
+		if (defined $cmd_parameters{'service_name'}) {
+		    $filename = "service_name";
+		} elsif (defined $cmd_parameters{'vrrp_name'}) {
+		    $filename = "vrrp_name";
+		}
+		if (defined($cmd_parameters{$filename}))
+		{
+			$service_name = $cmd_parameters{$filename};
+			if (service_exists($service_name)) 
+			{
+				if ($cmd eq "add_sv" or $cmd eq "add_vrrp_sv")
+				{
+					err_exit("$op_ret_num_msg{'52'}", 52);
+				}
+				$ret = load_sub_config("$service_name.conf");
+				if($ret ne 0)
+				{
+					err_exit("$op_ret_num_msg{'62'} $filename=$service_name", 62);
+				}
+			}
+			else
+			{
+				if ($cmd ne "add_sv" and $cmd ne "add_vrrp_sv")
+				{
+					err_exit("$op_ret_num_msg{'51'}", 51);
+				}
+			}
+		}
+		$ret = $cmds_table{$cmd}(\%cmd_parameters);
+		bvs_mgr_log("INFO", "$host_name: run \'@ARGV\', ret=$ret, $op_ret_num_msg{$ret}");
+		if($ret eq 0)
+		{
+			if ($flag_sub_config_modified eq 1)
+			{   
+				dump_config_file("$service_name.conf", 0);
+				my $lines = `sed /^[[:space:]]*\$/d $service_name.conf | wc -l`;
+				chomp $lines;
+				if ($lines == 0) {
+					my %param_tmp = ("service_name"	=>	"$service_name");
+					del_service(\%param_tmp);
+				}
+			}
+			if($flag_main_config_modified eq 1)
+			{
+				dump_config_file("$main_config_file_path", 1);
+			}
+		}
+		err_exit("$op_ret_num_msg{$ret}" , $ret);
+	}
+	else
+	{
+		err_exit("$opt_err_num_msg{'104'} $ARGV[0]!", 104);
+	}
+}
+
+sub init_env
+{
+	my @tmp;
+	$curr_dir = `$PWD_CMD 2>&1`;
+	chomp($curr_dir);
+	if(not -d $curr_dir)
+	{
+		err_exit("$opt_err_num_msg{'105'} $curr_dir\n",105);
+	}
+	@tmp = split('/', $curr_dir);
+	if($#tmp < 1)
+	{
+		err_exit("$opt_err_num_msg{'105'} $curr_dir\n",105);
+	}
+
+	$host_name = $tmp[$#tmp];
+	$cluster_name = $tmp[$#tmp-1];
+	$num_of_param = $#ARGV;
+}
+
+sub lock_bvs
+{
+	`mkdir lock`;
+	if($? ne 0)
+	{
+		return 0;
+	}
+	return 1;
+}
+
+
+################
+# main process
+################
+if(not defined($ARGV[0]) or $ARGV[0] eq "help")
+{
+	usage($0);
+}
+init_env();
+#if(!lock_bvs())
+#{
+#	print("$op_ret_num_msg{'99'}\n");
+#	exit(99);
+#}
+dispatch_cmd();
+#unlock_bvs();

@@ -1,0 +1,75 @@
+#!/usr/bin/perl
+# $Description: Reload keepalived process according to the options: all/vrrp/checker.If no option is given, use all.
+# $Date: 2010-03-22
+# $Bug-Report: stl-net@baidu.com
+# $ChangeLog:
+
+use strict;
+use warnings;
+require("/home/bvs-manager/bvs/common.pl");
+
+# cmds
+my $KILL_HUP_CMD = '/bin/kill -HUP';
+my $CAT_CMD = '/bin/cat ';
+
+# process and pid file
+my %hup_process =
+(
+	'all'=>'/var/run/keepalived.pid',
+	'vrrp'=>'/var/run/vrrp.pid',
+	'checker'=>'/var/run/checkers.pid'
+);
+
+my %op_num_msg =
+(
+	'102'=>"Invalid option",
+	'201'=>"Pid file doesn't exist",
+	'202'=>"Get invalid pid",
+	'203'=>"Error in kill -HUP"
+);
+
+# which process to send HUP signal to
+my $process = 'all';
+my $pid;
+
+my $hup_result = "";
+# Main process
+if(defined($ARGV[0]))
+{
+	if(defined($hup_process{$ARGV[0]}))
+	{
+		$process = $ARGV[0];
+	}
+	else
+	{
+		err_exit("$op_num_msg{'102'}: $ARGV[0]", 102);
+	}
+}
+
+if(-f $hup_process{$process})
+{
+	$pid = `$CAT_CMD $hup_process{$process}`;
+	if ($pid !~ /^\d+$/)
+	{
+		`keepalived -d -f /usr/loca/etc/keepalived/keepalived.conf`;
+		#err_exit("$op_num_msg{'202'}: $process", 202);
+		print "load keepalived!\n";
+		exit(0);
+	}
+}
+else
+{
+	err_exit("$op_num_msg{'201'}: $process", 201);
+}
+
+$hup_result = `$KILL_HUP_CMD $pid`;
+
+if($? != 0 or $hup_result ne "")
+{
+	err_exit("$op_num_msg{'203'} $process.", 203);
+}
+else
+{
+	print("Reload keepalived/$process Finish!\n");
+	exit(0);
+}

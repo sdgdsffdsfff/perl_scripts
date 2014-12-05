@@ -1,0 +1,191 @@
+#!/usr/bin/perl
+# $Description: Add/Del/Show vip on lo.
+# $Date: 2010-03-22
+# $Bug-Report: stl-net@baidu.com
+# $ChangeLog:
+
+use strict;
+use warnings;
+require("/home/bvs-manager/bvs/common.pl");
+
+my $rc_local_file = "/etc/rc.d/rc.local";
+
+# ip Commands
+my $IP_ADDR_CMD = "/sbin/ip addr";
+my $IP_CMD_SUFFIX="dev lo 2>&1";
+my $CAT_CMD="/bin/cat ";
+
+#ip addr add 123.125.65.237/32 dev lo
+# Support Functions
+my %cmds_table =
+(
+	'add'=>\&mod_vip,
+	'del'=>\&mod_vip,
+	'get'=>\&get_vip
+);
+
+my %cmds_opt_table =
+(
+	'add'=>\&check_op_vip,
+	'del'=>\&check_op_vip,
+	'get'=>\&check_no_vip
+);
+
+my %op_num_msg =
+(
+	'0'=>"Success",
+	'102'=>"Invalid option",
+	'211'=>"Error in exec ip addr command",
+	'212'=>"Error in modify rc.local",
+	'213'=>"/etc/rc.d/rc.local back up error"
+);
+
+# Global Vars
+my $cmd;
+my $result;
+my $vip;
+
+# Functions
+# check parameters in add/del cmd
+# return: true--parameters are ok; false--bad parameters.
+sub check_op_vip()
+{
+	my $ret = 0;
+	if ($#ARGV eq 1)
+	{
+		$vip = $ARGV[1];
+		$ret = is_ip($vip);
+	}
+	return $ret;
+}
+
+# check parameters in get cmd
+# return: 1--parameters are ok; 0--bad parameters.
+sub check_no_vip()
+{
+	$vip = 0;
+	if ($#ARGV eq 0)
+	{
+		return 1;
+	}
+	return 0;
+}
+
+# modify rc.local according to $_[0] add/del
+# return: 2--modify rc.local error; 0--success
+sub mod_rc_local($$)
+{
+	my @rc_local = `$CAT_CMD $rc_local_file`;
+	my @new_rc_local = ();
+	my $ret = back_up_file($rc_local_file, "/etc/rc.d");
+	if ($ret != 1)
+	{
+		print("Error in back up file $rc_local_file\n");
+		return 213;
+	}
+	
+	if($_[0] eq "add")
+	{
+		foreach my $line (@rc_local)
+		{
+			if($line =~ /^\s*[a-z\/]*ip\s+addr\s+add\s+$_[1].*\s+dev lo/)
+			{
+				chomp($line);
+				print("$line exists in $rc_local_file\n");
+				return 212;
+			}
+			else
+			{
+				push(@new_rc_local, $line);
+			}
+		}
+		push (@new_rc_local, "$IP_ADDR_CMD $_[0] $_[1]\/32 dev lo\n")
+	}
+	else
+	{
+		my $ip_exists = 0;
+		foreach my $line (@rc_local)
+		{
+			if($line !~ /^\s*[a-z\/]*ip\s+addr\s+add\s+$_[1].*\s+dev lo/)
+			{
+				push (@new_rc_local, $line);
+			}
+			else
+			{
+				$ip_exists = 1;
+			}
+		}
+		if($ip_exists eq 0)
+		{
+			print("$_[1] doesn't exist in $rc_local_file\n");
+			return 212;
+		}
+	}
+
+	open(RC_L_FD, ">$rc_local_file");
+	foreach my $new_line (@new_rc_local)
+	{
+		print RC_L_FD $new_line;
+	}
+	close(RC_L_FD);
+	return 0;
+}
+
+# add vip to lo and modify rc.local
+# return: 0--success;
+#         1--ip addr add/del error
+#         2--modify rc.local error
+sub mod_vip($$)
+{
+	my $add_del = $_[0];
+	my $ip = $_[1];
+	my $ret = 0;
+	my $op_vip_result = `$IP_ADDR_CMD $add_del $ip/32 $IP_CMD_SUFFIX`;
+	if($? ne 0 or $op_vip_result ne "") # Something went wrong...
+	{
+		print "$op_vip_result";
+		return 211;
+	}
+	$ret = mod_rc_local("$add_del", $ip);
+	return $ret;
+}
+
+# list ip on lo
+sub get_vip($$)
+{
+	my $vip_on_lo = `$IP_ADDR_CMD list $IP_CMD_SUFFIX`;
+	if ($? ne 0)
+	{
+		return 211;
+	}
+	print $vip_on_lo;
+	return 0;
+}
+
+###############
+# Main process
+###############
+if(not defined($ARGV[0]) or $ARGV[0] eq "help")
+{
+    err_exit("$0	add/del [VIP]	add/del [VIP] on lo and modify rc.local\n		get	show vip on lo", 0);
+}
+
+# Get command
+$cmd  = $ARGV[0];
+# Check cmd and options, then call the right function for the cmd.
+if (defined($cmds_table{$cmd}))
+{
+	# Valid cmd, call the right function
+	$result=$cmds_opt_table{$cmd}();
+	if ($result ne 1)
+	{
+		err_exit("$op_num_msg{'102'}", 102);
+	}
+
+	$result=$cmds_table{$cmd}($cmd, $vip);
+	err_exit("$op_num_msg{$result}", $result);
+}
+else
+{
+	err_exit("$op_num_msg{'102'}", 102);
+}
