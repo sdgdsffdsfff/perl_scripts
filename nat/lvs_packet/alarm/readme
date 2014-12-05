@@ -1,4 +1,0 @@
-lvsm.pl: normal use
-dl_lvsm.pl: used by dl lvs
-
-remind to change run to dl_lvsm.pl for dl.
