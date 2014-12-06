@@ -4,7 +4,8 @@ use diagnostics;
 use strict;
 use 5.010;
 use Thread;
-use Term::ReadKey;
+use Term::Cap;
+use POSIX;
 
 
 my $termios = new POSIX::Termios;
@@ -20,6 +21,7 @@ $terminal->Trequire(qw/ce ku kd/);
 #clear the screen
 my $clear_string = $terminal->Tputs('cl');
 print $clear_string;
+
 while (1){
 	$terminal->Tgoto('cm', $col, $row, $FH);
 	my $time = `date`;
