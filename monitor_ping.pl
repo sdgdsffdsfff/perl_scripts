@@ -79,7 +79,8 @@ while (1){
 	my $value;
 	print $clear_string;
 	my $info1 = "-" x $screen_col;
-	my $info2 = "|".(" " x ($screen_col-2))."|";
+	#my $info2 = "|".(" " x ($screen_col-2))."|";
+	my $info2 = (" " x (($screen_col-12)/2))."version 0.1".(" " x (($screen_col-12)/2));
 	$terminal->Tgoto('cm', $col, $row, $FH);
 	say $info1;
 	say $info2;
@@ -88,11 +89,11 @@ while (1){
 		if($value eq "timeout"){
 			print color('bold red');
             		#print "$key => $value\n";
-            		printf "%-15s => %-12s\n",$key,$value;
+            		printf "%-15s   -->   %-12s\n",$key,$value;
             		print color('reset');
             	}else{
             		#print "$key => $value\n";
-            		printf "%-15s => %-15s\n",$key,$value;
+            		printf "%-15s   -->   %-15s\n",$key,$value;
             	}
 	}
 	sleep 1;	
